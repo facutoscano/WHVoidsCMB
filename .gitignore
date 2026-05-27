@@ -1,0 +1,10 @@
+# Archivos de resultados y datos
+*.pdf
+*.dat
+*.txt
+
+# Caché de Python y Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
