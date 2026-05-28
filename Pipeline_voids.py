@@ -27,10 +27,10 @@ config = {
     'rmin': 35.0, 'rmax': 62.7,        # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
-    'max_Rvoid': 4.0,                  
+    'max_Rvoid': 2.5,                  
     'Rvoid_bin': 0.1,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking          
-    'smooth_value_arcmin': 10.0,         # Arcmin, 0 = No smoothing, >0 = CMB Gaussian smoothing kernel 
+    'smooth_value_arcmin': 40.0,         # Arcmin, 0 = No smoothing, >0 = CMB Gaussian smoothing kernel 
     'sigma_miscentering': 0.0,
 
     # Binning setup
@@ -42,9 +42,9 @@ config = {
     'rmax_fit_mpc': 10.0, 
     
     # Error estimation setup
-    'exec_mode': 'no_errors',              # 'no_errors' or 'errors'
+    'exec_mode': 'errors',              # 'no_errors' or 'errors'
     'n_subsamples': 20,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 0,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)          
+    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)          
     
     # MCMC setup
     'mcmc_walkers': 32, 

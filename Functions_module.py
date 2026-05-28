@@ -234,7 +234,7 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
         im = ax.imshow(map_to_plot, origin='lower', cmap='viridis', extent=extent, vmin=v_min, vmax=v_max)
         t = f"Bin {data.get('key', 'Comb')} (z={data['z_mean']:.3f})"
         ax.set_title(t)
-        if i == 0: ax.set_ylabel(r"$r / R_v")
+        if i == 0: ax.set_ylabel(r"$r / R_v$")
         else: ax.tick_params(labelleft=False)
 
     cax = fig.add_subplot(gs[0, -1])
@@ -242,14 +242,14 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
 
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[1, i])
-        ax.errorbar(data['r_frac'], data['profile'], yerr=data['error'], fmt='o-', color='xkcd:blue violet', capsize=3)
+        ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:blue violet', capsize=3)
         ax.axhline(0, color='k', linestyle=':', alpha=0.6)
         ax.axvline(1, color='gray', linestyle='--', alpha=0.8)
 
         ax.set_xlabel(r"Radius [$r / R_v$]")
-        ax.set_xlim(0, max_Rvoid + 0.5)
+        ax.set_xlim(-0.1, max_Rvoid + 0.1)
         ax.grid(True, alpha=0.3)
-        if i == 0: ax.set_ylabel(r'$\kappa$')
+        if i == 0: ax.set_ylabel(r'$\kappa [10^{-3}]$')
         else: ax.tick_params(labelleft=False)
 
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
