@@ -2,6 +2,7 @@
 *.pdf
 *.dat
 *.txt
+*.npz
 
 # Caché de Python y Jupyter
 __pycache__/
