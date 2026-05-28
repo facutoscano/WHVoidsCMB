@@ -246,7 +246,7 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
         ax.axhline(0, color='k', linestyle=':', alpha=0.6)
         ax.axvline(1, color='gray', linestyle='--', alpha=0.8)
 
-        ax.set_xlabel("Radius [$r / R_v$]")
+        ax.set_xlabel(r"Radius [$r / R_v$]")
         ax.set_xlim(0, max_Rvoid + 0.5)
         ax.grid(True, alpha=0.3)
         if i == 0: ax.set_ylabel(r'$\kappa$')

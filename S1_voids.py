@@ -51,8 +51,8 @@ def run_pipeline(config):
     #%% CMB map and masks
     print(f'Reading {release} CMB Convergence map...')
     nside = 2048
-    klm_file = f'{data_folder}CMB/KAPPA_{release}klm_MV.fits'
-    common_mask_file = f'{data_folder}CMB/Common_mask_Lensing_2048.fits'
+    klm_file = f'{data_folder}CMB/Lensing/KAPPA_{release}klm_MV.fits'
+    common_mask_file = f'{data_folder}CMB/Lensing/Common_mask_PR4Lensing_2048.fits'
     
     cmb_alm = hp.fitsfunc.read_alm(klm_file, hdu=1, return_mmax=False)
     common_mask = hp.read_map(common_mask_file)      
@@ -126,7 +126,7 @@ def run_pipeline(config):
             lensing_map=lensing_map, 
             common_mask=common_mask, 
             stacks_cache_folder=stacks_cache_folder, 
-            n_rand_factor=random_factor, 
+            n_random_factor=random_factor, 
             n_subsamples=n_subsamples
         )
 

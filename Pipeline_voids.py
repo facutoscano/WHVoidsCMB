@@ -23,28 +23,28 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'  
-    'zmin': 0.2, 'zmax': 0.65,          #zmin = 0.051 zmax = 0.583 
+    'zmin': 0.2, 'zmax': 0.583,          #zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 62.7,        # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
-    'max_Rvoid': 2.0,                  
-    'Rvoid_bin': 0.3,        
+    'max_Rvoid': 4.0,                  
+    'Rvoid_bin': 0.1,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking          
-    'smooth_value_arcmin': 0.0,         # Arcmin, 0 = No smoothing, >0 = CMB Gaussian smoothing kernel 
+    'smooth_value_arcmin': 10.0,         # Arcmin, 0 = No smoothing, >0 = CMB Gaussian smoothing kernel 
     'sigma_miscentering': 0.0,
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 3,                        
+    'n_bins': 1,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  
     'rmax_fit_mpc': 10.0, 
     
     # Error estimation setup
-    'exec_mode': 'errors',              # 'no_errors' or 'errors'
+    'exec_mode': 'no_errors',              # 'no_errors' or 'errors'
     'n_subsamples': 20,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)          
+    'n_rand_factor': 0,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)          
     
     # MCMC setup
     'mcmc_walkers': 32, 
@@ -69,10 +69,10 @@ def get_run_folder_path(cfg):
     reso_rv = 2 * cfg['max_Rvoid'] / cfg['npix_stamp']
     bins_tag = f"{cfg['n_bins']}bins"
 
-    folder_name = (f"{cfg['release']}_{bins_tag}_"
+    folder_name = (f"{cfg['release']}_{cfg['binning_mode']}_{bins_tag}_"
                    f"{cfg['exec_mode']}_{cfg['zmin']}_{cfg['zmax']}_"
                    f"{cfg['rmin']}_{cfg['rmax']}_"
-                   f"maxRv{cfg['max_Rvoid']:.1f}Mpc_{reso_rv}Rvperpix")
+                   f"maxRv{cfg['max_Rvoid']:.1f}_{reso_rv}Rvperpix")
     return os.path.join(cfg['output_folder'], folder_name)
 
 def main():
