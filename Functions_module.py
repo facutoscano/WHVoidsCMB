@@ -284,7 +284,7 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
         ax.grid(True, alpha=0.3)
         if i == 0: 
             ax.set_ylabel(r'$\kappa [10^{-3}]$')
-            ax.legend(loc='upper right')
+            ax.legend(loc='lower right', frameon=True, fontsize=10)
         else: 
             ax.tick_params(labelleft=False)
 
