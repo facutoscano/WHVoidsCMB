@@ -33,6 +33,39 @@ def get_angularsize_comoving(z, size_mpch):
     return theta_deg
 
 
+def footprint_mask(l, b, output_nside, footprint_nside=16): 
+    npix_footprint = hp.nside2npix(footprint_nside)
+    footprint_mask = np.zeros(npix_footprint, dtype=np.float32)
+    pix_indices = hp.ang2pix(footprint_nside, l, b, lonlat=True)
+    footprint_mask[pix_indices] = 1.0
+    output_mask = hp.ud_grade(footprint_mask, nside_out=output_nside)
+    output_mask[output_mask > 0] = 1.0
+    return output_mask
+
+
+def generate_random(mask, n_random, nside):
+    valid_l, valid_b, count = [], [], 0
+    while count < n_random:
+        l_batch = np.random.uniform(0.0, 360.0, int(n_random * 1.5))
+        sin_b_batch = np.random.uniform(-1.0, 1.0, int(n_random * 1.5))
+        b_batch = np.degrees(np.arcsin(sin_b_batch))
+        pix_batch = hp.ang2pix(nside, l_batch, b_batch, lonlat=True)
+        is_valid = mask[pix_batch] > 0.9 if not np.any(np.isnan(mask)) else (~np.isnan(mask[pix_batch]) & (mask[pix_batch] > 0.9))
+        valid_l.extend(l_batch[is_valid])
+        valid_b.extend(b_batch[is_valid])
+        count = len(valid_l)
+    return np.array(valid_l[:n_random]), np.array(valid_b[:n_random])
+
+def rotate_map(map_data, rot_angles):
+    nside = hp.npix2nside(len(map_data))
+    npix = hp.nside2npix(nside)
+    theta, phi = hp.pix2ang(nside, np.arange(npix))
+    r = hp.rotator.Rotator(rot=rot_angles, deg=True, inv=True)
+    theta_rot, phi_rot = r(theta, phi)
+    pix_rot = hp.ang2pix(nside, theta_rot, phi_rot)
+    return map_data[pix_rot]
+
+
 def stacking_gnomonic(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, stacked_range):
     print(f'Stacking {len(stacked_range)} maps using scaled Rv...')
     stacked_map = np.zeros((npix_stamp, npix_stamp))
@@ -88,70 +121,40 @@ def radial_profile_flat(stack_map, max_Rvoid, bins_frac, silent=False):
 
     return profile, r_centers
 
+def null_test_rotations(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, bins_frac, n_rotations):
+    print(f'Performing null test with {n_rotations} random rotations of the CMB map...')
+    null_profiles = []
+    angles = np.linspace(360/n_rotations, 360, n_rotations, endpoint=False)
 
-def footprint_mask(l, b, output_nside, footprint_nside=32): 
-    npix_footprint = hp.nside2npix(footprint_nside)
-    footprint_mask = np.zeros(npix_footprint, dtype=np.float32)
-    pix_indices = hp.ang2pix(footprint_nside, l, b, lonlat=True)
-    footprint_mask[pix_indices] = 1.0
-    output_mask = hp.ud_grade(footprint_mask, nside_out=output_nside)
-    output_mask[output_mask > 0] = 1.0
-    return output_mask
+    for i, ang in enumerate(angles):
+        rot_cmb = rotate_map(cmb_map, rot_angles=[ang, 0, 0])
+        rot_mask = rotate_map(mask, rot_angles=[ang, 0, 0])
 
+        stack_null, _ = stacking_gnomonic(l, b, redshifts, r_voids, rot_cmb, rot_mask, max_Rvoid, npix_stamp, range(len(l)))
+        prof_null, _ = radial_profile_flat(stack_null, max_Rvoid, bins_frac, silent=True)
+        null_profiles.append(prof_null)
 
-def generate_random(mask, n_random, nside):
-    valid_l, valid_b, count = [], [], 0
-    while count < n_random:
-        l_batch = np.random.uniform(0.0, 360.0, int(n_random * 1.5))
-        sin_b_batch = np.random.uniform(-1.0, 1.0, int(n_random * 1.5))
-        b_batch = np.degrees(np.arcsin(sin_b_batch))
-        pix_batch = hp.ang2pix(nside, l_batch, b_batch, lonlat=True)
-        is_valid = mask[pix_batch] > 0.9 if not np.any(np.isnan(mask)) else (~np.isnan(mask[pix_batch]) & (mask[pix_batch] > 0.9))
-        valid_l.extend(l_batch[is_valid])
-        valid_b.extend(b_batch[is_valid])
-        count = len(valid_l)
-    return np.array(valid_l[:n_random]), np.array(valid_b[:n_random])
+    null_profiles = np.array(null_profiles)
+    return np.nanmean(null_profiles, axis=0), np.nanstd(null_profiles, axis=0)
 
+def null_test_randoms(nside, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor):
+    print(f'Performing null test with {n_random_factor} random positions per void...')
+    null_profiles = []
+    n_voids = len(redshifts)
 
-def get_filename(release, z_text, max_Rvoid, npix, smooth_value):
-    return f'{release}_z{z_text}_maxRv{max_Rvoid:.1f}_npix{npix}_{smooth_value}deg.npz'
+    for i in range(n_random_factor):
+        rand_l, rand_b = generate_random(mask, n_voids, nside)
+        rand_idx = np.random.permutation(n_voids)
 
+        stack_null, _ = stacking_gnomonic(rand_l, rand_b, redshifts[rand_idx], r_voids[rand_idx], cmb_map, mask, max_Rvoid, npix_stamp, range(n_voids))
+        prof_null, _ = radial_profile_flat(stack_null, max_Rvoid, bins_frac, silent=True)
+        null_profiles.append(prof_null)
 
-def manage_randoms_incremental(filename, n_needed, z_sample_dist, rv_sample_dist, max_Rvoid, nside, mask, lensing_map, npix_stamp):
-    if os.path.exists(filename):
-        data = np.load(filename)
-        stack_mean_old, count_map_old, n_stacked_old = data['stack_mean'], data['count_map'], int(data['n_total_randoms'])
-        print(f"Found existing randoms: {n_stacked_old} total. Needed: {n_needed}.")
-    else:
-        stack_mean_old, count_map_old, n_stacked_old = np.zeros((npix_stamp, npix_stamp)), np.zeros((npix_stamp, npix_stamp)), 0
-        print(f"Not previous randoms found. Starting from scratch.")
-
-    n_missing = n_needed - n_stacked_old
-    if n_missing > 0:
-        print(f"Doing incremental stacking with {n_missing} new randoms...")
-        rand_l, rand_b = generate_random(mask, n_random=n_missing, nside=nside)
-        
-        rand_idx = np.random.choice(len(z_sample_dist), size=n_missing, replace=True)
-        rand_z = z_sample_dist[rand_idx]
-        rand_rv = rv_sample_dist[rand_idx]
-        
-        stack_mean_new, count_map_new = stacking_gnomonic(rand_l, rand_b, rand_z, rand_rv, lensing_map, mask, max_Rvoid, npix_stamp, range(n_missing))
-        
-        sum_old, sum_new = stack_mean_old * count_map_old, stack_mean_new * count_map_new
-        total_count_map = count_map_old + count_map_new
-        total_stack_mean = np.zeros_like(sum_old)
-        valid_pixels = total_count_map > 0
-        total_stack_mean[valid_pixels] = (sum_old + sum_new)[valid_pixels] / total_count_map[valid_pixels]
-        
-        np.savez(filename, stack_mean=total_stack_mean, count_map=total_count_map, n_total_randoms=n_stacked_old + n_missing)
-        return total_stack_mean
-    
-    else:
-        print(f"Enough randoms already stacked.")
-        return stack_mean_old
+    null_profiles = np.array(null_profiles)
+    return np.nanmean(null_profiles, axis=0), np.nanstd(null_profiles, axis=0)
 
 
-def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, max_Rvoid, npix_stamp, stack_rand_mean, bins_frac, n_subsamples=20):
+def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples=20):
     ra_rad, dec_rad = np.radians(l[indices]), np.radians(b[indices])
     coords_xyz = np.column_stack([np.cos(dec_rad) * np.cos(ra_rad), np.cos(dec_rad) * np.sin(ra_rad), np.sin(dec_rad)])
 
@@ -166,7 +169,7 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
             weights.append(0)
             partial_stacks.append(np.zeros((npix_stamp, npix_stamp)))
             continue
-        stack_k, _, _ = stacking_gnomonic(l[indices][in_region], b[indices][in_region], redshifts[indices][in_region], r_voids[indices][in_region], lensing_map, mask, max_Rvoid, npix_stamp, range(len(idxs_k)))
+        stack_k, _ = stacking_gnomonic(l[indices][in_region], b[indices][in_region], redshifts[indices][in_region], r_voids[indices][in_region], lensing_map, mask, max_Rvoid, npix_stamp, range(len(idxs_k)))
         partial_stacks.append(stack_k)
         weights.append(len(idxs_k))
         
@@ -181,7 +184,7 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
             continue
 
         stack_loo = np.sum(partial_stacks[mask_loo] * valid_w[:, None, None], axis=0) / np.sum(valid_w)
-        prof, _ = radial_profile_flat(stack_loo - stack_rand_mean, max_Rvoid, bins_frac, silent=True)
+        prof, _ = radial_profile_flat(stack_loo, max_Rvoid, bins_frac, silent=True)
         jk_profiles.append(prof)
         
     jk_profiles = np.array(jk_profiles)
@@ -189,43 +192,67 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
     cov_matrix = (len(jk_profiles) - 1) / len(jk_profiles) * np.dot((jk_profiles - prof_mean).T, jk_profiles - prof_mean)
     
     total_stack_w = np.sum(partial_stacks * weights[:, None, None], axis=0) / np.sum(weights)
-    best_prof, _ = radial_profile_flat(total_stack_w - stack_rand_mean, max_Rvoid, bins_frac)
+    best_prof, _ = radial_profile_flat(total_stack_w, max_Rvoid, bins_frac)
 
     return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles
 
 
-def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, smooth_value, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor=10, n_subsamples=20):
+def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, smooth_value, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20):
     z_text = f'{z_min:.2f}_{z_max:.2f}'
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
     
-    file_random = stacks_cache_folder + get_filename(release, z_text, max_Rvoid, npix_stamp, smooth_value)
-    
-    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=32)
+    print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')  
+    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=16)
     effective_mask = common_mask * survey_mask
 
-    stack_rand_mean = manage_randoms_incremental(file_random, n_voids * n_random_factor, redshifts_all, r_voids_all, max_Rvoid, nside, effective_mask, lensing_map, npix_stamp)
-    
+    # Null tests
+    cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_maxRv{max_Rvoid:.1f}_{smooth_value:.2f}deg_nrand{n_random_factor}_nrot{n_rotations}.npz')
+    if os.path.exists(cache_file):
+        print(f'Loading null test results from cache: {cache_file}')
+        data_cache = np.load(cache_file)
+        null_rot_mean, null_rot_std = data_cache['null_rot_mean'], data_cache['null_rot_std']
+        null_rand_mean, null_rand_std = data_cache['null_rand_mean'], data_cache['null_rand_std']
+    else:
+        null_rot_mean, null_rot_std = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations)
+        null_rand_mean, null_rand_std = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor)
+        np.savez(cache_file, null_rot_mean=null_rot_mean, null_rot_std=null_rot_std, null_rand_mean=null_rand_mean, null_rand_std=null_rand_std)
+        print(f'Null test results saved to cache: {cache_file}')
+
+    # Signal
+    print('Computing mean random stack for signal estimation...')
+    stack_cl, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, range(n_voids))
+    signal_map = stack_cl
+
     if mode == 'errors':
-        prof_mean, prof_err, jk_profiles = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, stack_rand_mean, bins_frac, n_subsamples)
-        stack_cl, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, range(n_voids))
-        signal_map = stack_cl - stack_rand_mean
+        prof_mean, prof_err, _ = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples)
         _, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
     else:
-        stack_cl, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, range(n_voids))
-        signal_map = stack_cl - stack_rand_mean
         prof_mean, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
         prof_err = np.zeros_like(prof_mean)
 
-    return {'z_mean': z_mean, 'map': signal_map, 'r_frac': r_frac, 'profile': prof_mean, 'error': prof_err, 'n_voids': n_voids, 'key': z_text}
+    return {
+        'z_mean': z_mean, 
+        'map': signal_map, 
+        'r_frac': r_frac, 
+        'profile': prof_mean, 
+        'error': prof_err, 
+        'null_rot_mean': null_rot_mean,
+        'null_rot_std': null_rot_std,
+        'null_rand_mean': null_rand_mean,
+        'null_rand_std': null_rand_std,
+        'n_voids': n_voids, 
+        'key': z_text
+        }
+
 
 def plot_results(data_list, output_path, smooth_value, max_Rvoid):
     n_plots = len(data_list)
-    fig = plt.figure(figsize=(5 * n_plots, 8))
-    gs = gridspec.GridSpec(2, n_plots + 1, width_ratios=[1]*n_plots + [0.05], hspace=0.2, wspace=0.15)
+    fig = plt.figure(figsize=(6 * n_plots, 9))
+    gs = gridspec.GridSpec(2, n_plots + 1, width_ratios=[1]*n_plots + [0.05], hspace=0.25, wspace=0.15)
 
     all_maps = np.array([d['map'] for d in data_list])
-    v_max, v_min = np.percentile(all_maps, 99.9), np.percentile(all_maps, 0.1)
+    v_max, v_min = np.percentile(all_maps, 99.5), np.percentile(all_maps, 0.5)
     extent = [-max_Rvoid, max_Rvoid, -max_Rvoid, max_Rvoid]
 
     for i, data in enumerate(data_list):
@@ -242,15 +269,24 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
 
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[1, i])
-        ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:blue violet', capsize=3)
-        ax.axhline(0, color='k', linestyle=':', alpha=0.6)
-        ax.axvline(1, color='gray', linestyle='--', alpha=0.8)
 
+        ax.fill_between(data['r_frac'], data['null_rand_mean']*1e3 - data['null_rand_std']*1e3, data['null_rand_mean']*1e3 + data['null_rand_std']*1e3, color='xkcd:grey', alpha=0.5, zorder=1, label=r'$1\sigma$ randoms')
+
+        ax.fill_between(data['r_frac'], data['null_rot_mean']*1e3 - data['null_rot_std']*1e3, data['null_rot_mean']*1e3 + data['null_rot_std']*1e3, color='xkcd:salmon', alpha=0.5, zorder=2, label=r'$1\sigma$ rotations')
+
+        ax.axhline(0, color='k', linestyle=':', alpha=0.6, zorder=3)
+        ax.axvline(1, color='gray', linestyle='--', alpha=0.8, zorder=3)
+
+        ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:steel blue', capsize=3, label='Signal', zorder=4)
+        
         ax.set_xlabel(r"Radius [$r / R_v$]")
         ax.set_xlim(-0.1, max_Rvoid + 0.1)
         ax.grid(True, alpha=0.3)
-        if i == 0: ax.set_ylabel(r'$\kappa [10^{-3}]$')
-        else: ax.tick_params(labelleft=False)
+        if i == 0: 
+            ax.set_ylabel(r'$\kappa [10^{-3}]$')
+            ax.legend(loc='upper right')
+        else: 
+            ax.tick_params(labelleft=False)
 
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to {output_path}")

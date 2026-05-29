@@ -30,7 +30,8 @@ def run_pipeline(config):
     n_bins_quantile = config['n_bins']
     exec_mode = config['exec_mode']
     n_subsamples = config['n_subsamples']
-    random_factor = config['n_rand_factor']
+    random_factor = config.get('n_rand_factor', 10)
+    n_rotations = config.get('n_rotations', 10)
     
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
     file_suffix = f'{release}_{mode_label}_{exec_mode}_{zmin}_{zmax}_{rmin}_{rmax}_maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix'
@@ -126,7 +127,8 @@ def run_pipeline(config):
             lensing_map=lensing_map, 
             common_mask=common_mask, 
             stacks_cache_folder=stacks_cache_folder, 
-            n_random_factor=random_factor, 
+            n_random_factor=random_factor,
+            n_rotations=n_rotations, 
             n_subsamples=n_subsamples
         )
 

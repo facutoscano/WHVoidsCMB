@@ -44,7 +44,8 @@ config = {
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
     'n_subsamples': 20,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)          
+    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
+    'n_rotations': 10,                  # Number of random rotations of the cmb map for cosmic variance estimation
     
     # MCMC setup
     'mcmc_walkers': 32, 
