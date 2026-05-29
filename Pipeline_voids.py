@@ -23,7 +23,7 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'  
-    'zmin': 0.2, 'zmax': 0.583,          #zmin = 0.051 zmax = 0.583 
+    'zmin': 0.4, 'zmax': 0.583,          #zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 62.7,        # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
@@ -43,7 +43,7 @@ config = {
     
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
-    'n_subsamples': 20,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
+    'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
     'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
     'n_rotations': 10,                  # Number of random rotations of the cmb map for cosmic variance estimation
     

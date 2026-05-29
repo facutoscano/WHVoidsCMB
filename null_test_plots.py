@@ -46,7 +46,7 @@ def main():
     n_voids = len(cat_final)
     print(f"Number of voids: {n_voids}")
 
-    common_mask_file = f'{data_folder}CMB/Common_mask_Lensing_2048.fits'
+    common_mask_file = f'{data_folder}CMB/Lensing/Common_mask_Lensing_2048.fits'
     common_mask = hp.read_map(common_mask_file)
     survey_mask = fm.footprint_mask(l_v, b_v, output_nside=nside, footprint_nside=32)
     effective_mask = common_mask * survey_mask
