@@ -22,9 +22,11 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # Data selection
-    'release': 'PR4',                   # 'PR3' or 'PR4'  
-    'zmin': 0.4, 'zmax': 0.583,          #zmin = 0.051 zmax = 0.583 
-    'rmin': 35.0, 'rmax': 62.7,        # Mpc/h , rmin=35 rmax=62.7
+    'release': 'PR4',                   # 'PR3' or 'PR4'
+    'N_seeds': None,                    # Number of random seeds used to identify voids. If None, it uses the simplest void catalog without random seeds. Nmax = 100
+    'delta_LOS': -0.05,                  # If N_seeds is not None, delta_LOS < 'delta_LOS'. If None, it is not applied.
+    'zmin': 0.4, 'zmax': 0.583,         #zmin = 0.051 zmax = 0.583 
+    'rmin': 35.0, 'rmax': 62.7,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  

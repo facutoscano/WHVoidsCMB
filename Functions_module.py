@@ -5,6 +5,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.cm as cm
 import healpy as hp
 import pandas as pd
 import pickle
@@ -277,8 +278,23 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
         ax.axhline(0, color='k', linestyle=':', alpha=0.6, zorder=3)
         ax.axvline(1, color='gray', linestyle='--', alpha=0.8, zorder=3)
 
-        ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:steel blue', capsize=3, label='Signal', zorder=4)
-        
+        if data.get('is_multi_seed', False):
+            seed_results = data['seed_results']
+            
+            colors = cm.plasma(np.linspace(0, 0.8, len(seed_results)))
+            
+            for j, s_res in enumerate(seed_results):
+                label_seed = 'Seeds profiles' if j == 0 else None
+                ax.plot(data['r_frac'], s_res['profile']*1e3, color=colors[j], alpha=0.3, linewidth=1, zorder=4, label=label_seed)
+            
+            mean_profile = np.mean([s['profile'] for s in seed_results], axis=0)
+            mean_error = np.mean([s['error'] for s in seed_results], axis=0)
+            
+            ax.errorbar(data['r_frac'], mean_profile*1e3, yerr=mean_error*1e3, fmt='o-', color='xkcd:red', capsize=3, label='Mean Signal', zorder=5, linewidth=2)
+            
+        else:
+            ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:steel blue', capsize=3, label='Signal', zorder=4)
+            
         ax.set_xlabel(r"Radius [$r / R_v$]")
         ax.set_xlim(-0.1, max_Rvoid + 0.1)
         ax.grid(True, alpha=0.3)
