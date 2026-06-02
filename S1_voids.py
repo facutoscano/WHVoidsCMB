@@ -79,7 +79,8 @@ def run_pipeline(config):
             voids_data[seed] = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
             final_data[seed] = voids_data[seed][
                 (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & 
-                (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2) ].copy()
+                (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2) & (voids_data[seed]['delta_LOS'] > delta_LOS)
+                ].copy()
             print(f'Seed {seed+1}: Total voids = {len(final_data[seed])}')
         print('All voids data loaded.\n')
     else:
