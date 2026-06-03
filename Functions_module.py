@@ -33,6 +33,30 @@ def get_angularsize_comoving(z, size_mpch):
     theta_deg = np.degrees(theta_rad)
     return theta_deg
 
+def apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048):
+    nlkk_data = np.loadtxt(nlkk_file)
+    ell_nlkk = nlkk_data[:, 0].astype(int)
+    nl_kk = nlkk_data[:, 1]     # noise
+    sn_kk = nlkk_data[:, 2]     # signal + noise
+
+    cl_kk = sn_kk - nl_kk
+    cl_kk = np.maximum(cl_kk, 0)        # avoiding negative Cls
+
+    W = np.zeros(lmax + 1)
+    for i, ell in enumerate(ell_nlkk):
+        if ell > lmax:
+            break
+        denom = cl_kk[i] + nl_kk[i]
+        W[ell] = cl_kk[i] / denom if denom > 0 else 0.0
+    
+    alm_filtered = hp.almxfl(cmb_alm.copy(), W)
+
+    print(f'Wiener filter applied. W_ell range: '
+          f'W[10]={W[10]:.3f}, W[100]={W[100]:.3f}, '
+          f'W[500]={W[500]:.3f}, W[1000]={W[1000]:.3f}')
+
+    return alm_filtered, W
+
 
 def footprint_mask(l, b, output_nside, footprint_nside=64): 
     npix_footprint = hp.nside2npix(footprint_nside)

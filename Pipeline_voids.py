@@ -30,21 +30,20 @@ config = {
                                         # If it is positive only voids with delta_LOS > delta_value are considered. 
                                         # If it is negative, only voids with delta_LOS < delta_value are considered
     
-    'zmin': 0.05, 'zmax': 0.583,        # zmin = 0.051 zmax = 0.583 
+    'zmin': 0.05, 'zmax': 0.3,        # zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 62.7,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
     'Rvoid_bin': 0.1,        
-    'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking          
-    'smooth_value_arcmin': 40.0,        # Arcmin.
-                                        # 0  = No smoothing
-                                        # >0 = CMB Gaussian smoothing kernel 
+    'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
+    'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
+    'smooth_value_arcmin': 40.0,        # Just used if filter_mode is 'gaussian'
     'sigma_miscentering': 0.0,
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 3,                        
+    'n_bins': 2,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  

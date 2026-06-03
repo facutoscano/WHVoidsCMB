@@ -35,7 +35,7 @@ def run_pipeline(config):
     
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
     delta_LOS_value = config.get('delta_value', None)
-
+    
     if delta_LOS_value is None:
         delta_label = "dLOS_all"
     elif delta_LOS_value > 0:
@@ -43,10 +43,18 @@ def run_pipeline(config):
     else:
         delta_label = f"dLOS_lt{abs(delta_LOS_value):.2f}"
 
+    filter_label = config.get('filter_mode', 'none')
+    if filter_label == 'gaussian':
+        filter_label = f'gaussian_{smooth_value_deg:.1f}deg'
+    elif filter_label == 'wiener':
+        filter_label = 'wiener'
+    else:
+        filter_label = 'no_filter'
+
     file_suffix = (f'{release}_{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
-                   f'{delta_label}')
+                   f'{delta_label}_{filter_label}')
     
     run_folder = os.path.join(output_folder, file_suffix)
     if not os.path.exists(run_folder):
@@ -70,11 +78,18 @@ def run_pipeline(config):
     cmb_alm = hp.fitsfunc.read_alm(klm_file, hdu=1, return_mmax=False)
     common_mask = hp.read_map(common_mask_file)      
 
-    if smooth_value_deg > 0.:
-        lensing_map = hp.alm2map(cmb_alm, nside, fwhm=smooth_value_deg*np.pi/180.)
+    filter_mode = config.get('filter_mode', 'none')
+    if filter_mode == 'wiener':
+        nlkk_file = f'{data_folder}CMB/Lensing/nlkk_PR3_MV.dat'
+        cmb_alm_filtered, W_ell = fm.apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048)
+        lensing_map = hp.alm2map(cmb_alm_filtered, nside=nside)
+        print('CMB map filtered with Wiener filter.')
+    elif filter_mode == 'gaussian' and smooth_value_deg > 0:
+        lensing_map = hp.smoothing(hp.alm2map(cmb_alm, nside=nside), fwhm=np.radians(smooth_value_deg))
+        print(f'CMB map smoothed with Gaussian kernel of FWHM={smooth_value_deg:.1f} deg.')
     else:
-        lensing_map = hp.alm2map(cmb_alm, nside)
-    print('CMB map and mask loaded.\n')
+        lensing_map = hp.alm2map(cmb_alm, nside=nside)
+        print('CMB map without additional filtering applied.')
     print('')
 
     #%% Reading and selecting voids data
@@ -244,8 +259,13 @@ def run_pipeline(config):
                     'is_multi_seed': True,
                     'seed_results': seed_results,
                     'z_mean': np.mean(z_means_all),
+                    'n_voids': int(np.mean([r['n_voids'] for r in seed_results])),
                     'map': np.mean([r['map'] for r in seed_results], axis=0),
                     'r_frac': seed_results[0]['r_frac'],
+                    'profile': np.mean([r['profile'] for r in seed_results], axis=0),
+                    'error': np.mean([r['error'] for r in seed_results], axis=0),
+                    'cov_matrix': None,
+                    'jk_profiles': None,
                     'null_rand_mean': np.mean([r['null_rand_mean'] for r in seed_results], axis=0),
                     'null_rand_std': np.mean([r['null_rand_std'] for r in seed_results], axis=0),
                     'null_rot_mean': np.mean([r['null_rot_mean'] for r in seed_results], axis=0),
