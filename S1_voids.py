@@ -34,7 +34,18 @@ def run_pipeline(config):
     n_rotations = config.get('n_rotations', 10)
     
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
-    file_suffix = f'{release}_{mode_label}_{exec_mode}_{zmin}_{zmax}_{rmin}_{rmax}_maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix'
+
+    if delta_LOS_value is None:
+        delta_label = "dLOS_all"
+    elif delta_LOS_value > 0:
+        delta_label = f"dLOS_gt{delta_LOS_value:.2f}"
+    else:
+        delta_label = f"dLOS_lt{abs(delta_LOS_value):.2f}"
+
+    file_suffix = (f'{release}_{mode_label}_{exec_mode}_'
+                   f'{zmin}_{zmax}_{rmin}_{rmax}_'
+                   f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
+                   f'{delta_label}')
     
     run_folder = os.path.join(output_folder, file_suffix)
     if not os.path.exists(run_folder):
@@ -68,7 +79,16 @@ def run_pipeline(config):
     #%% Reading and selecting voids data
     print('Reading Wen-Han voids catalogue...')
     n_seeds = config.get('N_seeds', None)
-    delta_LOS = config.get('delta_LOS', 0.)
+    delta_LOS_value = config.get('delta_value', None)
+
+    def apply_delta_LOS_filter(df, delta_value):
+        if delta_value is None:
+            return df
+        elif delta_value >= 0:
+            return df[df['delta_LOS'] > delta_value]
+        else:
+            return df[df['delta_LOS'] < delta_value]
+
     if n_seeds is not None:
         print(f"Reading {n_seeds} voids catalogues identified with different random seeds...")
         col_names = ['R_void', 'l', 'b', 'z', 'x', 'y', 'z_cart', 'delta_int', 'delta_23', 'completeness', 'delta_LOS']
@@ -77,21 +97,22 @@ def run_pipeline(config):
         for seed in range(n_seeds):
             file_path = f'{data_folder}/CATALOGOS/WenHan_voids_z0.6/voids_z0.6_{(seed+1):03d}.dat'
             voids_data[seed] = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
-            final_data[seed] = voids_data[seed][
-                (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & 
-                (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2) & (voids_data[seed]['delta_LOS'] > delta_LOS)
-                ].copy()
-            print(f'Seed {seed+1}: Total voids = {len(final_data[seed])}')
+            
+            base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2)
+            filtered_data = voids_data[seed][base_filter].copy()
+            final_data[seed] = apply_delta_LOS_filter(filtered_data, delta_LOS_value)
         print('All voids data loaded.\n')
     else:
         col_names = ['R_void', 'l', 'b', 'z']
         voids_data_raw = pd.read_csv(f'{data_folder}/CATALOGOS/WenHan_voids.dat', sep='\s+', names=col_names, header=None)
         final_data = voids_data_raw[
-        (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) & 
-        (voids_data_raw['R_void'] >= rmin) & (voids_data_raw['R_void'] <= rmax)].copy()
+            (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) & 
+            (voids_data_raw['R_void'] >= rmin) & (voids_data_raw['R_void'] <= rmax)
+        ].copy()
         print(f'Total voids: {len(final_data)}')
         print('Voids data loaded.\n')
-    print('')
+        print(f'Seed {seed+1}: Total voids = {len(final_data[seed])}')
+        print('All voids data loaded.\n')
 
     #%% BINNING DATA
     print(f'\nBinning data...')
@@ -170,12 +191,14 @@ def run_pipeline(config):
                 stacks_cache_folder=stacks_cache_folder, 
                 n_random_factor=random_factor,
                 n_rotations=n_rotations, 
-                n_subsamples=n_subsamples
+                n_subsamples=n_subsamples,
+                delta_label=delta_label,
+                force_rerun=config.get('force_rerun', False)
             )
 
             result['bin_id'] = info['id']
             result['binning_mode'] = binning_mode
-            result['is_multiple_seeds'] = False
+            result['is_multi_seed'] = False
             bin_results_list.append(result)
     else:
         for info in bins_info_list:
@@ -204,18 +227,23 @@ def run_pipeline(config):
                     npix_stamp=npix_stamp, nside=nside, smooth_value=smooth_value_deg, 
                     bins_frac=bins_frac, lensing_map=lensing_map, common_mask=common_mask, 
                     stacks_cache_folder=seed_cache_folder, n_random_factor=random_factor,
-                    n_rotations=n_rotations, n_subsamples=n_subsamples
+                    n_rotations=n_rotations, n_subsamples=n_subsamples, delta_label=delta_label, force_rerun=config.get('force_rerun', False)
                 )
                 result['seed'] = seed
                 seed_results.append(result)
             
             if len(seed_results) > 0:
+                z_means_all = [r['z_mean'] for r in seed_results if 'z_mean' in r]
+                z_min_combined = np.min([sd['z_range'][0] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
+                z_max_combined = np.max([sd['z_range'][1] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
+
                 combined_result = {
                     'bin_id': bin_id,
+                    'key': f"{z_min_combined:.2f}_{z_max_combined:.2f}",
                     'binning_mode': binning_mode,
                     'is_multi_seed': True,
                     'seed_results': seed_results,
-                    'z_mean': np.mean([r['z_mean'] for r in seed_results if 'z_mean' in r]),
+                    'z_mean': np.mean(z_means_all),
                     'map': np.mean([r['map'] for r in seed_results], axis=0),
                     'r_frac': seed_results[0]['r_frac'],
                     'null_rand_mean': np.mean([r['null_rand_mean'] for r in seed_results], axis=0),
@@ -230,7 +258,11 @@ def run_pipeline(config):
     print('Saving results...')
     
     output_plot_path = os.path.join(run_folder, f'Voids_Lensing_Profiles_{file_suffix}.pdf')
-    fm.plot_results(bin_results_list, output_plot_path, smooth_value_deg, max_Rvoid)
+    fm.plot_results(bin_results_list, output_plot_path, max_Rvoid)
+
+    if exec_mode == 'errors':
+        jk_plot_path = os.path.join(run_folder, f'JK_Correlation_{file_suffix}.pdf')
+        fm.plot_jackknife_and_correlation(bin_results_list, jk_plot_path, max_Rvoid)
 
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
     save_dict = {'bins_data': bin_results_list, 'parameters': config}

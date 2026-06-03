@@ -23,16 +23,23 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'N_seeds': 10,                    # Number of random seeds used to identify voids. If None, it uses the simplest void catalog without random seeds. Nmax = 100
-    'delta_LOS': 0.0,                  # If N_seeds is not None, delta_LOS < 'delta_LOS'. If None, it is not applied.
-    'zmin': 0.05, 'zmax': 0.583,         #zmin = 0.051 zmax = 0.583 
+    'N_seeds': 10,                      # Number of random seeds used to identify voids. 
+                                        # If None, it uses the simplest void catalog without random seeds. Nmax = 100
+    
+    'delta_value': None,                # If None = no filter. 
+                                        # If it is positive only voids with delta_LOS > delta_value are considered. 
+                                        # If it is negative, only voids with delta_LOS < delta_value are considered
+    
+    'zmin': 0.05, 'zmax': 0.583,        # zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 62.7,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
     'Rvoid_bin': 0.1,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking          
-    'smooth_value_arcmin': 40.0,         # Arcmin, 0 = No smoothing, >0 = CMB Gaussian smoothing kernel 
+    'smooth_value_arcmin': 40.0,        # Arcmin.
+                                        # 0  = No smoothing
+                                        # >0 = CMB Gaussian smoothing kernel 
     'sigma_miscentering': 0.0,
 
     # Binning setup

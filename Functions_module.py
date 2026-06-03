@@ -34,7 +34,7 @@ def get_angularsize_comoving(z, size_mpch):
     return theta_deg
 
 
-def footprint_mask(l, b, output_nside, footprint_nside=16): 
+def footprint_mask(l, b, output_nside, footprint_nside=64): 
     npix_footprint = hp.nside2npix(footprint_nside)
     footprint_mask = np.zeros(npix_footprint, dtype=np.float32)
     pix_indices = hp.ang2pix(footprint_nside, l, b, lonlat=True)
@@ -122,16 +122,17 @@ def radial_profile_flat(stack_map, max_Rvoid, bins_frac, silent=False):
 
     return profile, r_centers
 
-def null_test_rotations(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, bins_frac, n_rotations):
+def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations):
     print(f'Performing null test with {n_rotations} random rotations of the CMB map...')
     null_profiles = []
     angles = np.linspace(360/n_rotations, 360, n_rotations, endpoint=False)
 
     for i, ang in enumerate(angles):
         rot_cmb = rotate_map(cmb_map, rot_angles=[ang, 0, 0])
-        rot_mask = rotate_map(mask, rot_angles=[ang, 0, 0])
+        rot_mask = rotate_map(cmb_mask, rot_angles=[ang, 0, 0])
+        rot_effective_mask = rot_mask * survey_mask
 
-        stack_null, _ = stacking_gnomonic(l, b, redshifts, r_voids, rot_cmb, rot_mask, max_Rvoid, npix_stamp, range(len(l)))
+        stack_null, _ = stacking_gnomonic(l, b, redshifts, r_voids, rot_cmb, rot_effective_mask, max_Rvoid, npix_stamp, range(len(l)))
         prof_null, _ = radial_profile_flat(stack_null, max_Rvoid, bins_frac, silent=True)
         null_profiles.append(prof_null)
 
@@ -174,48 +175,52 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
         partial_stacks.append(stack_k)
         weights.append(len(idxs_k))
         
-    partial_stacks, weights = np.array(partial_stacks), np.array(weights)
-    jk_profiles = []
+    partial_stacks = np.array(partial_stacks)
+    weights =  np.array(weights)
+    
+    total_stack_w = np.sum(partial_stacks * weights[:, None, None], axis=0) / np.sum(weights)
+    best_prof, _ = radial_profile_flat(total_stack_w, max_Rvoid, bins_frac)
 
+    jk_profiles = []
     for k in range(n_subsamples):
         mask_loo = np.arange(n_subsamples) != k
         valid_w = weights[mask_loo]
         if np.sum(valid_w) == 0: 
             jk_profiles.append(np.zeros(len(bins_frac)-1))
             continue
-
         stack_loo = np.sum(partial_stacks[mask_loo] * valid_w[:, None, None], axis=0) / np.sum(valid_w)
         prof, _ = radial_profile_flat(stack_loo, max_Rvoid, bins_frac, silent=True)
         jk_profiles.append(prof)
         
     jk_profiles = np.array(jk_profiles)
-    prof_mean = np.mean(jk_profiles, axis=0)
-    cov_matrix = (len(jk_profiles) - 1) / len(jk_profiles) * np.dot((jk_profiles - prof_mean).T, jk_profiles - prof_mean)
-    
-    total_stack_w = np.sum(partial_stacks * weights[:, None, None], axis=0) / np.sum(weights)
-    best_prof, _ = radial_profile_flat(total_stack_w, max_Rvoid, bins_frac)
 
-    return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles
+    cov_matrix = (n_subsamples - 1) / n_subsamples * np.dot((jk_profiles - best_prof).T, jk_profiles - best_prof)
+
+    return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles, cov_matrix
 
 
-def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, smooth_value, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20):
+def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, smooth_value, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='dLOS_all', force_rerun=False):
     z_text = f'{z_min:.2f}_{z_max:.2f}'
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
     
     print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')  
-    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=16)
+    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=64)
     effective_mask = common_mask * survey_mask
 
     # Null tests
-    cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_maxRv{max_Rvoid:.1f}_{smooth_value:.2f}deg_nrand{n_random_factor}_nrot{n_rotations}.npz')
-    if os.path.exists(cache_file):
+    cache_file = os.path.join(stacks_cache_folder,
+    f'null_tests_{release}_{z_text}_{delta_label}_'
+    f'maxRv{max_Rvoid:.1f}_{smooth_value:.2f}deg_'
+    f'nrand{n_random_factor}_nrot{n_rotations}.npz')
+
+    if os.path.exists(cache_file) and not force_rerun:
         print(f'Loading null test results from cache: {cache_file}')
         data_cache = np.load(cache_file)
         null_rot_mean, null_rot_std = data_cache['null_rot_mean'], data_cache['null_rot_std']
         null_rand_mean, null_rand_std = data_cache['null_rand_mean'], data_cache['null_rand_std']
     else:
-        null_rot_mean, null_rot_std = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations)
+        null_rot_mean, null_rot_std = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations)
         null_rand_mean, null_rand_std = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor)
         np.savez(cache_file, null_rot_mean=null_rot_mean, null_rot_std=null_rot_std, null_rand_mean=null_rand_mean, null_rand_std=null_rand_std)
         print(f'Null test results saved to cache: {cache_file}')
@@ -225,19 +230,22 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
     stack_cl, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, range(n_voids))
     signal_map = stack_cl
 
+    prof_total, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
+    jk_profiles = None
+    cov_matrix = None
     if mode == 'errors':
-        prof_mean, prof_err, _ = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples)
-        _, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
+        _, prof_err, jk_profiles, cov_matrix = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples)
     else:
-        prof_mean, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
-        prof_err = np.zeros_like(prof_mean)
+        prof_err = np.zeros_like(prof_total)
 
     return {
         'z_mean': z_mean, 
         'map': signal_map, 
         'r_frac': r_frac, 
-        'profile': prof_mean, 
-        'error': prof_err, 
+        'profile': prof_total, 
+        'error': prof_err,
+        'jk_profiles': jk_profiles,
+        'cov_matrix': cov_matrix,
         'null_rot_mean': null_rot_mean,
         'null_rot_std': null_rot_std,
         'null_rand_mean': null_rand_mean,
@@ -246,8 +254,65 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
         'key': z_text
         }
 
+def plot_jackknife_and_correlation(bin_results_list, output_path, max_Rvoid):
+    n_bins = len(bin_results_list)
+    fig, axes = plt.subplots(n_bins, 2,
+                             figsize=(11, 4.5 * n_bins),
+                             gridspec_kw={'width_ratios': [1.2, 1]})
 
-def plot_results(data_list, output_path, smooth_value, max_Rvoid):
+    if n_bins == 1:
+        axes = axes[np.newaxis, :]
+
+    for row, data in enumerate(bin_results_list):
+        r_frac   = data['r_frac']
+        profile  = data['profile']
+        error    = data['error']
+        cov      = data.get('cov_matrix')
+        label    = data.get('key', f"Bin {row+1}")
+        z_mean   = data['z_mean']
+        n_voids  = data.get('n_voids', '?')
+
+        ax_prof = axes[row, 0]
+        ax_prof.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
+        ax_prof.axvline(1, color='gray', linestyle='--', alpha=0.7, linewidth=1)
+        ax_prof.errorbar(r_frac, profile * 1e3, yerr=error * 1e3,
+                         fmt='o-', color='xkcd:steel blue',
+                         capsize=3, linewidth=1.8, label='Signal (jackknife err.)')
+        ax_prof.set_xlim(-0.05, max_Rvoid + 0.05)
+        ax_prof.set_xlabel(r'$r\,/\,R_v$')
+        ax_prof.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        ax_prof.set_title(f'Bin {label}  (z={z_mean:.3f}, N={n_voids})')
+        ax_prof.legend(loc='lower right', frameon=True, fontsize=9)
+        ax_prof.grid(True, alpha=0.25)
+
+        ax_corr = axes[row, 1]
+        if cov is not None:
+            std = np.sqrt(np.diag(cov))
+            with np.errstate(invalid='ignore'):
+                corr = cov / np.outer(std, std)
+            corr = np.nan_to_num(corr)
+
+            im = ax_corr.imshow(corr, origin='lower', cmap='RdBu_r',
+                                vmin=-1, vmax=1,
+                                extent=[r_frac[0], r_frac[-1],
+                                        r_frac[0], r_frac[-1]],
+                                aspect='auto')
+            plt.colorbar(im, ax=ax_corr, label='Correlation', fraction=0.046, pad=0.04)
+            ax_corr.set_xlabel(r'$r\,/\,R_v$')
+            ax_corr.set_ylabel(r'$r\,/\,R_v$')
+            ax_corr.set_title(f'JK correlation matrix — Bin {label}')
+        else:
+            ax_corr.text(0.5, 0.5, 'No jackknife data\n(mode="no_errors")',
+                         ha='center', va='center', transform=ax_corr.transAxes,
+                         fontsize=11, color='gray')
+            ax_corr.set_axis_off()
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    print(f'JK+correlation plot saved to {output_path}')
+    plt.close()
+
+def plot_results(data_list, output_path, max_Rvoid):
     n_plots = len(data_list)
     fig = plt.figure(figsize=(6 * n_plots, 9))
     gs = gridspec.GridSpec(2, n_plots + 1, width_ratios=[1]*n_plots + [0.05], hspace=0.25, wspace=0.15)
@@ -258,7 +323,7 @@ def plot_results(data_list, output_path, smooth_value, max_Rvoid):
 
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[0, i])
-        map_to_plot = gaussian_filter(data['map'], sigma=smooth_value) if smooth_value > 0 else data['map']
+        map_to_plot = data['map']
         im = ax.imshow(map_to_plot, origin='lower', cmap='viridis', extent=extent, vmin=v_min, vmax=v_max)
         t = f"Bin {data.get('key', 'Comb')} (z={data['z_mean']:.3f})"
         ax.set_title(t)
