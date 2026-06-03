@@ -223,7 +223,7 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
     return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles, cov_matrix
 
 
-def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, smooth_value, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='dLOS_all', force_rerun=False):
+def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='dLOS_all', filter_label='none', force_rerun=False):
     z_text = f'{z_min:.2f}_{z_max:.2f}'
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
@@ -234,8 +234,8 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
 
     # Null tests
     cache_file = os.path.join(stacks_cache_folder,
-    f'null_tests_{release}_{z_text}_{delta_label}_'
-    f'maxRv{max_Rvoid:.1f}_{smooth_value:.2f}deg_'
+    f'null_tests_{release}_{z_text}_{delta_label}_{filter_label}_'
+    f'maxRv{max_Rvoid:.1f}_'
     f'nrand{n_random_factor}_nrot{n_rotations}.npz')
 
     if os.path.exists(cache_file) and not force_rerun:

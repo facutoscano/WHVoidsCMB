@@ -2,7 +2,6 @@
 import sys
 import os
 import json
-import numpy as np
 import S1_voids as s1_voids
 
 #%% Logger
@@ -43,7 +42,7 @@ config = {
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 2,                        
+    'n_bins': 1,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  
@@ -52,8 +51,8 @@ config = {
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
     'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
-    'n_rotations': 10,                  # Number of random rotations of the cmb map for cosmic variance estimation
+    'n_rand_factor': 1,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
+    'n_rotations': 1,                  # Number of random rotations of the cmb map for cosmic variance estimation
     
     # MCMC setup
     'mcmc_walkers': 32, 
@@ -73,28 +72,16 @@ config = {
 }
 
 #%% Auxiliary functions
-def get_run_folder_path(cfg):
-    
-    reso_rv = 2 * cfg['max_Rvoid'] / cfg['npix_stamp']
-    bins_tag = f"{cfg['n_bins']}bins"
-
-    folder_name = (f"{cfg['release']}_{cfg['binning_mode']}_{bins_tag}_"
-                   f"{cfg['exec_mode']}_{cfg['zmin']}_{cfg['zmax']}_"
-                   f"{cfg['rmin']}_{cfg['rmax']}_"
-                   f"maxRv{cfg['max_Rvoid']:.1f}_{reso_rv}Rvperpix")
-    return os.path.join(cfg['output_folder'], folder_name)
-
 def main():
-    run_folder = get_run_folder_path(config)
-    if not os.path.exists(run_folder): os.makedirs(run_folder)
-
-    sys.stdout = DualLogger(os.path.join(run_folder, "WHVoidsCMB_pipeline_log.txt"))
+    
+    log_path = os.path.join(config['output_folder'], "pipeline_run.log")
+    sys.stdout = DualLogger(log_path)
     
     title = "WEN-HAN VOIDS x CMB LENSING PROFILES"
     print(f"### PIPELINE RUN: {title} ###")
-    print(f"Output: {run_folder}")
-    
-    with open(os.path.join(run_folder, "WHVoidsCMB_pipeline_config.json"), 'w') as f:
+    print(f"Output: {config['output_folder']}")
+
+    with open(os.path.join(config['output_folder'], "WHVoidsCMB_pipeline_config.json"), 'w') as f:
         json.dump(config, f, indent=4)
 
     try:
@@ -115,7 +102,7 @@ def main():
             s3_voids.run_pipeline(config)
         ''' 
 
-        with open(os.path.join(run_folder, "SUCCESS"), 'w') as f: f.write("Done.")
+        with open(os.path.join(config['output_folder'], "SUCCESS"), 'w') as f: f.write("Done.")
         print("\n=== FINISHED ===")
 
     except Exception as e:

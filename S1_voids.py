@@ -126,8 +126,6 @@ def run_pipeline(config):
         ].copy()
         print(f'Total voids: {len(final_data)}')
         print('Voids data loaded.\n')
-        print(f'Seed {seed+1}: Total voids = {len(final_data[seed])}')
-        print('All voids data loaded.\n')
 
     #%% BINNING DATA
     print(f'\nBinning data...')
@@ -199,7 +197,6 @@ def run_pipeline(config):
                 max_Rvoid=max_Rvoid, 
                 npix_stamp=npix_stamp, 
                 nside=nside, 
-                smooth_value=smooth_value_deg, 
                 bins_frac=bins_frac,
                 lensing_map=lensing_map, 
                 common_mask=common_mask, 
@@ -208,6 +205,7 @@ def run_pipeline(config):
                 n_rotations=n_rotations, 
                 n_subsamples=n_subsamples,
                 delta_label=delta_label,
+                filter_label=filter_label,
                 force_rerun=config.get('force_rerun', False)
             )
 
@@ -239,10 +237,10 @@ def run_pipeline(config):
                 result = fm.process_bin_stacking(
                     release=release, mode=exec_mode, z_min=z_bin_min, z_max=z_bin_max, 
                     data_sample_bin=data_bin, coords_bin=coords_bin, max_Rvoid=max_Rvoid, 
-                    npix_stamp=npix_stamp, nside=nside, smooth_value=smooth_value_deg, 
-                    bins_frac=bins_frac, lensing_map=lensing_map, common_mask=common_mask, 
+                    npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac, 
+                    lensing_map=lensing_map, common_mask=common_mask, 
                     stacks_cache_folder=seed_cache_folder, n_random_factor=random_factor,
-                    n_rotations=n_rotations, n_subsamples=n_subsamples, delta_label=delta_label, force_rerun=config.get('force_rerun', False)
+                    n_rotations=n_rotations, n_subsamples=n_subsamples, delta_label=delta_label, filter_label=filter_label, force_rerun=config.get('force_rerun', False)
                 )
                 result['seed'] = seed
                 seed_results.append(result)
