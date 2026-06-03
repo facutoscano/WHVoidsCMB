@@ -34,6 +34,7 @@ def run_pipeline(config):
     n_rotations = config.get('n_rotations', 10)
     
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
+    delta_LOS_value = config.get('delta_value', None)
 
     if delta_LOS_value is None:
         delta_label = "dLOS_all"
@@ -79,7 +80,6 @@ def run_pipeline(config):
     #%% Reading and selecting voids data
     print('Reading Wen-Han voids catalogue...')
     n_seeds = config.get('N_seeds', None)
-    delta_LOS_value = config.get('delta_value', None)
 
     def apply_delta_LOS_filter(df, delta_value):
         if delta_value is None:
