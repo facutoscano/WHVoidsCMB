@@ -278,122 +278,203 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
         'key': z_text
         }
 
+def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
+    n_bins = len(data_list)
+    fig = plt.figure(figsize=(6 * n_bins, 9))
+    gs = gridspec.GridSpec(2, n_bins + 1,
+                           width_ratios=[1] * n_bins + [0.05],
+                           hspace=0.3, wspace=0.15)
+
+    all_maps = np.array([d['map'] for d in data_list])
+    v_max = np.percentile(all_maps, 99.5)
+    v_min = np.percentile(all_maps, 0.5)
+    extent = [-max_Rvoid, max_Rvoid, -max_Rvoid, max_Rvoid]
+
+    # Mapas
+    for i, data in enumerate(data_list):
+        ax = fig.add_subplot(gs[0, i])
+        im = ax.imshow(data['map'], origin='lower', cmap='viridis',
+                       extent=extent, vmin=v_min, vmax=v_max)
+        n_voids = data.get('n_voids', '?')
+        ax.set_title(f"Bin {data.get('key', i+1)}\n"
+                     f"z={data['z_mean']:.3f}, N={n_voids}")
+        ax.set_xlabel(r'$r\,/\,R_v$')
+        if i == 0:
+            ax.set_ylabel(r'$r\,/\,R_v$')
+        else:
+            ax.tick_params(labelleft=False)
+
+    cax = fig.add_subplot(gs[0, -1])
+    plt.colorbar(im, cax=cax, label=r'$\kappa$')
+
+    # Perfiles con null tests
+    for i, data in enumerate(data_list):
+        ax = fig.add_subplot(gs[1, i])
+
+        ax.fill_between(data['r_frac'],
+                        (data['null_rand_mean'] - data['null_rand_std']) * 1e3,
+                        (data['null_rand_mean'] + data['null_rand_std']) * 1e3,
+                        color='xkcd:grey', alpha=0.5, zorder=1,
+                        label=r'$1\sigma$ randoms')
+        ax.fill_between(data['r_frac'],
+                        (data['null_rot_mean'] - data['null_rot_std']) * 1e3,
+                        (data['null_rot_mean'] + data['null_rot_std']) * 1e3,
+                        color='xkcd:salmon', alpha=0.5, zorder=2,
+                        label=r'$1\sigma$ rotations')
+
+        ax.axhline(0,   color='k',    linestyle=':',  alpha=0.6, zorder=3)
+        ax.axvline(1.0, color='gray', linestyle='--', alpha=0.8, zorder=3)
+
+        ax.errorbar(data['r_frac'], data['profile'] * 1e3,
+                    yerr=data['error'] * 1e3,
+                    fmt='o-', color='xkcd:steel blue', capsize=3,
+                    linewidth=1.8, zorder=4, label='Signal (JK err.)')
+
+        ax.set_xlabel(r'$r\,/\,R_v$')
+        ax.set_xlim(-0.1, max_Rvoid + 0.1)
+        ax.grid(True, alpha=0.25)
+        if i == 0:
+            ax.set_ylabel(r'$\kappa\;[10^{-3}]$')
+            ax.legend(loc='lower right', frameon=True, fontsize=9)
+        else:
+            ax.tick_params(labelleft=False)
+
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Stacked maps + profiles plot saved to {output_path}")
+    plt.close()
+
+
 def plot_jackknife_and_correlation(bin_results_list, output_path, max_Rvoid):
     n_bins = len(bin_results_list)
-    fig, axes = plt.subplots(n_bins, 2,
-                             figsize=(11, 4.5 * n_bins),
-                             gridspec_kw={'width_ratios': [1.2, 1]})
+    fig, axes = plt.subplots(2, n_bins,
+                             figsize=(5.5 * n_bins, 9),
+                             gridspec_kw={'hspace': 0.35, 'wspace': 0.2})
 
     if n_bins == 1:
-        axes = axes[np.newaxis, :]
+        axes = axes[:, np.newaxis]
 
-    for row, data in enumerate(bin_results_list):
-        r_frac   = data['r_frac']
-        profile  = data['profile']
-        error    = data['error']
-        cov      = data.get('cov_matrix')
-        label    = data.get('key', f"Bin {row+1}")
-        z_mean   = data['z_mean']
-        n_voids  = data.get('n_voids', '?')
+    for col, data in enumerate(bin_results_list):
+        r_frac  = data['r_frac']
+        profile = data['profile']
+        error   = data['error']
+        cov     = data.get('cov_matrix')
+        label   = data.get('key', f"Bin {col+1}")
+        z_mean  = data['z_mean']
+        n_voids = data.get('n_voids', '?')
+        is_ms   = data.get('is_multi_seed', False)
 
-        ax_prof = axes[row, 0]
-        ax_prof.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
-        ax_prof.axvline(1, color='gray', linestyle='--', alpha=0.7, linewidth=1)
-        ax_prof.errorbar(r_frac, profile * 1e3, yerr=error * 1e3,
-                         fmt='o-', color='xkcd:steel blue',
-                         capsize=3, linewidth=1.8, label='Signal (jackknife err.)')
-        ax_prof.set_xlim(-0.05, max_Rvoid + 0.05)
-        ax_prof.set_xlabel(r'$r\,/\,R_v$')
-        ax_prof.set_ylabel(r'$\kappa\;[10^{-3}]$')
-        ax_prof.set_title(f'Bin {label}  (z={z_mean:.3f}, N={n_voids})')
-        ax_prof.legend(loc='lower right', frameon=True, fontsize=9)
-        ax_prof.grid(True, alpha=0.25)
+        # Perfil
+        ax_p = axes[0, col]
+        ax_p.axhline(0,   color='k',    linestyle=':',  alpha=0.5, linewidth=1)
+        ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
+        ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3,
+                      fmt='o-', color='xkcd:steel blue',
+                      capsize=3, linewidth=1.8,
+                      label='Signal (JK err.)')
+        ax_p.set_xlim(-0.05, max_Rvoid + 0.05)
+        ax_p.set_xlabel(r'$r\,/\,R_v$')
+        ax_p.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})")
+        ax_p.grid(True, alpha=0.25)
+        ax_p.legend(loc='lower right', frameon=True, fontsize=9)
+        if col == 0:
+            ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        else:
+            ax_p.tick_params(labelleft=False)
 
-        ax_corr = axes[row, 1]
+        # Matriz de correlación
+        ax_c = axes[1, col]
         if cov is not None:
             std = np.sqrt(np.diag(cov))
             with np.errstate(invalid='ignore'):
                 corr = cov / np.outer(std, std)
             corr = np.nan_to_num(corr)
 
-            im = ax_corr.imshow(corr, origin='lower', cmap='RdBu_r',
-                                vmin=-1, vmax=1,
-                                extent=[r_frac[0], r_frac[-1],
-                                        r_frac[0], r_frac[-1]],
-                                aspect='auto')
-            plt.colorbar(im, ax=ax_corr, label='Correlation', fraction=0.046, pad=0.04)
-            ax_corr.set_xlabel(r'$r\,/\,R_v$')
-            ax_corr.set_ylabel(r'$r\,/\,R_v$')
-            ax_corr.set_title(f'JK correlation matrix — Bin {label}')
+            im = ax_c.imshow(corr, origin='lower', cmap='RdBu_r',
+                             vmin=-1, vmax=1,
+                             extent=[r_frac[0], r_frac[-1],
+                                     r_frac[0], r_frac[-1]],
+                             aspect='auto')
+            plt.colorbar(im, ax=ax_c, label='Correlation',
+                         fraction=0.046, pad=0.04)
+            ax_c.set_xlabel(r'$r\,/\,R_v$')
+            corr_label = ('Seed-to-seed corr.' if is_ms
+                          else 'JK correlation matrix')
+            ax_c.set_title(f'{corr_label} — Bin {label}')
+            if col == 0:
+                ax_c.set_ylabel(r'$r\,/\,R_v$')
+            else:
+                ax_c.tick_params(labelleft=False)
         else:
-            ax_corr.text(0.5, 0.5, 'No jackknife data\n(mode="no_errors")',
-                         ha='center', va='center', transform=ax_corr.transAxes,
-                         fontsize=11, color='gray')
-            ax_corr.set_axis_off()
+            ax_c.text(0.5, 0.5, 'No covariance data',
+                      ha='center', va='center',
+                      transform=ax_c.transAxes,
+                      fontsize=11, color='gray')
+            ax_c.set_axis_off()
+
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    print(f"JK profile + correlation plot saved to {output_path}")
+    plt.close()
+
+
+def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
+    ms_bins = [d for d in bin_results_list if d.get('is_multi_seed', False)
+               and d.get('seed_results') is not None]
+
+    if len(ms_bins) == 0:
+        print("No multi-seed bins found, skipping seed consistency plot.")
+        return
+
+    n_bins = len(ms_bins)
+    fig, axes = plt.subplots(1, n_bins,
+                             figsize=(6 * n_bins, 5),
+                             sharey=False)
+
+    if n_bins == 1:
+        axes = [axes]
+
+    for col, data in enumerate(ms_bins):
+        ax = axes[col]
+        seed_results = data['seed_results']
+        r_frac  = data['r_frac']
+        n_seeds = len(seed_results)
+
+        colors = cm.plasma(np.linspace(0.05, 0.85, n_seeds))
+
+        for j, s_res in enumerate(seed_results):
+            ax.plot(r_frac, s_res['profile'] * 1e3,
+                    color=colors[j], alpha=0.4, linewidth=1.0,
+                    label=f'Seed {j+1}' if n_seeds <= 10 else None)
+
+        ax.errorbar(r_frac, data['profile'] * 1e3,
+                    yerr=data['error'] * 1e3,
+                    fmt='o-', color='black', linewidth=2.0,
+                    capsize=3, zorder=5,
+                    label='Combined (JK err.)')
+
+        ax.axhline(0,   color='k',    linestyle=':',  alpha=0.4, linewidth=1)
+        ax.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
+
+        label   = data.get('key', f"Bin {col+1}")
+        z_mean  = data['z_mean']
+        n_voids = data.get('n_voids', '?')
+        ax.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})\n"
+                     f"{n_seeds} seeds")
+        ax.set_xlabel(r'$r\,/\,R_v$')
+        ax.set_xlim(-0.05, max_Rvoid + 0.05)
+        ax.grid(True, alpha=0.25)
+
+        if col == 0:
+            ax.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        else:
+            ax.tick_params(labelleft=False)
+
+        if n_seeds <= 10:
+            ax.legend(loc='lower right', frameon=True, fontsize=8,
+                      ncol=2)
+        else:
+            ax.legend(loc='lower right', frameon=True, fontsize=9)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
-    print(f'JK+correlation plot saved to {output_path}')
-    plt.close()
-
-def plot_results(data_list, output_path, max_Rvoid):
-    n_plots = len(data_list)
-    fig = plt.figure(figsize=(6 * n_plots, 9))
-    gs = gridspec.GridSpec(2, n_plots + 1, width_ratios=[1]*n_plots + [0.05], hspace=0.25, wspace=0.15)
-
-    all_maps = np.array([d['map'] for d in data_list])
-    v_max, v_min = np.percentile(all_maps, 99.5), np.percentile(all_maps, 0.5)
-    extent = [-max_Rvoid, max_Rvoid, -max_Rvoid, max_Rvoid]
-
-    for i, data in enumerate(data_list):
-        ax = fig.add_subplot(gs[0, i])
-        map_to_plot = data['map']
-        im = ax.imshow(map_to_plot, origin='lower', cmap='viridis', extent=extent, vmin=v_min, vmax=v_max)
-        t = f"Bin {data.get('key', 'Comb')} (z={data['z_mean']:.3f})"
-        ax.set_title(t)
-        if i == 0: ax.set_ylabel(r"$r / R_v$")
-        else: ax.tick_params(labelleft=False)
-
-    cax = fig.add_subplot(gs[0, -1])
-    plt.colorbar(im, cax=cax, label=r'$\kappa$')
-
-    for i, data in enumerate(data_list):
-        ax = fig.add_subplot(gs[1, i])
-
-        ax.fill_between(data['r_frac'], data['null_rand_mean']*1e3 - data['null_rand_std']*1e3, data['null_rand_mean']*1e3 + data['null_rand_std']*1e3, color='xkcd:grey', alpha=0.5, zorder=1, label=r'$1\sigma$ randoms')
-
-        ax.fill_between(data['r_frac'], data['null_rot_mean']*1e3 - data['null_rot_std']*1e3, data['null_rot_mean']*1e3 + data['null_rot_std']*1e3, color='xkcd:salmon', alpha=0.5, zorder=2, label=r'$1\sigma$ rotations')
-
-        ax.axhline(0, color='k', linestyle=':', alpha=0.6, zorder=3)
-        ax.axvline(1, color='gray', linestyle='--', alpha=0.8, zorder=3)
-
-        if data.get('is_multi_seed', False):
-            seed_results = data['seed_results']
-            
-            colors = cm.plasma(np.linspace(0, 0.8, len(seed_results)))
-            
-            for j, s_res in enumerate(seed_results):
-                label_seed = 'Seeds profiles' if j == 0 else None
-                ax.plot(data['r_frac'], s_res['profile']*1e3, color=colors[j], alpha=0.3, linewidth=1, zorder=4, label=label_seed)
-            
-            mean_profile = np.mean([s['profile'] for s in seed_results], axis=0)
-            mean_error = np.mean([s['error'] for s in seed_results], axis=0)
-            
-            ax.errorbar(data['r_frac'], mean_profile*1e3, yerr=mean_error*1e3, fmt='o-', color='xkcd:red', capsize=3, label='Mean Signal', zorder=5, linewidth=2)
-            
-        else:
-            ax.errorbar(data['r_frac'], data['profile']*1e3, yerr=data['error']*1e3, fmt='o-', color='xkcd:steel blue', capsize=3, label='Signal', zorder=4)
-            
-        ax.set_xlabel(r"Radius [$r / R_v$]")
-        ax.set_xlim(-0.1, max_Rvoid + 0.1)
-        ax.grid(True, alpha=0.3)
-        if i == 0: 
-            ax.set_ylabel(r'$\kappa [10^{-3}]$')
-            ax.legend(loc='lower right', frameon=True, fontsize=10)
-        else: 
-            ax.tick_params(labelleft=False)
-
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Plot saved to {output_path}")
-    print('')
+    print(f"Seed consistency plot saved to {output_path}")
     plt.close()

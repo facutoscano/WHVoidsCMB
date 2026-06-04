@@ -250,50 +250,56 @@ def run_pipeline(config):
                 z_min_combined = np.min([sd['z_range'][0] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
                 z_max_combined = np.max([sd['z_range'][1] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
 
-                all_profiles = np.array([r['profile'] for r in seed_results])
-                mean_profile = np.mean(all_profiles, axis=0)
-                n_s = len(seed_results)
+                all_data_bin = pd.concat([info['data'][s]['data'] for s in range(n_seeds) if len(info['data'][s]['data']) > 0], ignore_index=True)
+                all_l = all_data_bin['l'].values
+                all_b = all_data_bin['b'].values
+                coords_combined = (all_l, all_b)
 
-                diff = all_profiles - mean_profile
-                cov_seed = (1 / (n_s - 1)) * np.dot(diff.T, diff)
-                err_seed = np.sqrt(np.diag(cov_seed) / n_s)
+                print(f'Combined stack: {len(all_data_bin)} total voids across {n_seeds} seeds')
 
+                combined_cache_folder = os.path.join(stacks_cache_folder, 'combined')
+                if not os.path.exists(combined_cache_folder):
+                    os.makedirs(combined_cache_folder)
+
+                result_combined = fm.process_bin_stacking(
+                    release=release, mode=exec_mode,
+                    z_min=z_min_combined, z_max=z_max_combined,       data_sample_bin=all_data_bin,
+                    coords_bin=coords_combined,
+                    max_Rvoid=max_Rvoid, npix_stamp=npix_stamp, nside=nside,        bins_frac=bins_frac, lensing_map=lensing_map,        common_mask=common_mask,        stacks_cache_folder=combined_cache_folder,        n_random_factor=random_factor, n_rotations=n_rotations,        n_subsamples=n_subsamples,
+                    delta_label=delta_label, filter_label=filter_label,        force_rerun=config.get('force_rerun', False))
+                
                 combined_result = {
-                    'bin_id': bin_id,
-                    'key': f"{z_min_combined:.2f}_{z_max_combined:.2f}",
+                    'bin_id':       bin_id,
+                    'key':          f"{z_min_combined:.2f}_{z_max_combined:.2f}",
                     'binning_mode': binning_mode,
                     'is_multi_seed': True,
                     'seed_results': seed_results,
-                    'z_mean': np.mean(z_means_all),
-                    'n_voids': int(np.mean([r['n_voids'] for r in seed_results])),
-                    'map': np.mean([r['map'] for r in seed_results], axis=0),
-                    'r_frac': seed_results[0]['r_frac'],
-                    'profile': mean_profile,
-                    'error': err_seed,
-                    'cov_matrix': cov_seed,
-                    'jk_profiles': all_profiles,
-                    'null_rand_mean': np.mean([r['null_rand_mean'] for r in seed_results], axis=0),
-                    'null_rand_std': np.mean([r['null_rand_std'] for r in seed_results], axis=0),
-                    'null_rot_mean': np.mean([r['null_rot_mean'] for r in seed_results], axis=0),
-                    'null_rot_std': np.mean([r['null_rot_std'] for r in seed_results], axis=0)
+                    'z_mean':       result_combined['z_mean'],
+                    'n_voids':      result_combined['n_voids'],
+                    'map':          result_combined['map'],
+                    'r_frac':       result_combined['r_frac'],
+                    'profile':      result_combined['profile'],        'error':        result_combined['error'],
+                    'cov_matrix':   result_combined['cov_matrix'],        'jk_profiles':  result_combined['jk_profiles'],        'null_rand_mean': result_combined['null_rand_mean'],        'null_rand_std':  result_combined['null_rand_std'],        'null_rot_mean':  result_combined['null_rot_mean'],        'null_rot_std':   result_combined['null_rot_std']
                 }
-                bin_results_list.append(combined_result)
-           
+                bin_results_list.append(combined_result)         
 
     # SAVING
     print('Saving results...')
-    
-    output_plot_path = os.path.join(run_folder, f'Voids_Lensing_Profiles_{file_suffix}.pdf')
-    fm.plot_results(bin_results_list, output_plot_path, max_Rvoid)
 
-    if exec_mode == 'errors':
-        jk_plot_path = os.path.join(run_folder, f'JK_Correlation_{file_suffix}.pdf')
-        fm.plot_jackknife_and_correlation(bin_results_list, jk_plot_path, max_Rvoid)
+    output_plot_path = os.path.join(run_folder, f'Stacked_Maps_NullTests_{file_suffix}.pdf')
+    fm.plot_stacked_maps_and_profiles(bin_results_list, output_plot_path, max_Rvoid)
+
+    jk_plot_path = os.path.join(run_folder, f'JK_Profile_Correlation_{file_suffix}.pdf')
+    fm.plot_jackknife_and_correlation(bin_results_list, jk_plot_path, max_Rvoid)
+
+    if any(d.get('is_multi_seed', False) for d in bin_results_list):
+        seeds_plot_path = os.path.join(run_folder, f'Seed_Consistency_{file_suffix}.pdf')
+        fm.plot_seed_consistency(bin_results_list, seeds_plot_path, max_Rvoid)
 
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
     save_dict = {'bins_data': bin_results_list, 'parameters': config}
-    
-    with open(data_save_path, 'wb') as f: pickle.dump(save_dict, f)
+    with open(data_save_path, 'wb') as f:
+        pickle.dump(save_dict, f)
     print(f"Data saved in: {data_save_path}")
 
 if __name__ == "__main__":

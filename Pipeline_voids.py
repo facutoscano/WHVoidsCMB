@@ -22,7 +22,7 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'N_seeds': 10,                      # Number of random seeds used to identify voids. 
+    'N_seeds': None,                      # Number of random seeds used to identify voids. 
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
     'delta_value': None,                # If None = no filter. 
@@ -36,8 +36,8 @@ config = {
     'max_Rvoid': 2.5,                  
     'Rvoid_bin': 0.1,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
-    'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
-    'smooth_value_arcmin': 40.0,        # Just used if filter_mode is 'gaussian'
+    'filter_mode': 'gaussian',            # 'none', 'gaussian', 'wiener'          
+    'smooth_value_arcmin': 30.0,        # Just used if filter_mode is 'gaussian'
     'sigma_miscentering': 0.0,
 
     # Binning setup
