@@ -58,7 +58,7 @@ def apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048):
     return alm_filtered, W
 
 
-def footprint_mask(l, b, output_nside, footprint_nside=64): 
+def footprint_mask(l, b, output_nside, footprint_nside=16): 
     npix_footprint = hp.nside2npix(footprint_nside)
     footprint_mask = np.zeros(npix_footprint, dtype=np.float32)
     pix_indices = hp.ang2pix(footprint_nside, l, b, lonlat=True)
@@ -115,7 +115,7 @@ def stacking_gnomonic(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_s
         count_map[valid_pixels] += 1
         if (i+1) % 150 == 0: print(f'Stacked {i+1} / {len(stacked_range)}')
     
-    final_stack = np.zeros_like(stacked_map)
+    final_stack = np.full_like(stacked_map, np.nan)
     mask_final = count_map > 0
     final_stack[mask_final] = stacked_map[mask_final] / count_map[mask_final]
 
@@ -229,7 +229,7 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
     
     print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')  
-    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=64)
+    survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=16)
     effective_mask = common_mask * survey_mask
 
     # Null tests
