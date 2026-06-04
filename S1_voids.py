@@ -250,6 +250,14 @@ def run_pipeline(config):
                 z_min_combined = np.min([sd['z_range'][0] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
                 z_max_combined = np.max([sd['z_range'][1] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
 
+                all_profiles = np.array([r['profile'] for r in seed_results])
+                mean_profile = np.mean(all_profiles, axis=0)
+                n_s = len(seed_results)
+
+                diff = all_profiles - mean_profile
+                cov_seed = (1 / (n_s - 1)) * np.dot(diff.T, diff)
+                err_seed = np.sqrt(np.diag(cov_seed) / n_s)
+
                 combined_result = {
                     'bin_id': bin_id,
                     'key': f"{z_min_combined:.2f}_{z_max_combined:.2f}",
@@ -260,10 +268,10 @@ def run_pipeline(config):
                     'n_voids': int(np.mean([r['n_voids'] for r in seed_results])),
                     'map': np.mean([r['map'] for r in seed_results], axis=0),
                     'r_frac': seed_results[0]['r_frac'],
-                    'profile': np.mean([r['profile'] for r in seed_results], axis=0),
-                    'error': np.mean([r['error'] for r in seed_results], axis=0),
-                    'cov_matrix': None,
-                    'jk_profiles': None,
+                    'profile': mean_profile,
+                    'error': err_seed,
+                    'cov_matrix': cov_seed,
+                    'jk_profiles': all_profiles,
                     'null_rand_mean': np.mean([r['null_rand_mean'] for r in seed_results], axis=0),
                     'null_rand_std': np.mean([r['null_rand_std'] for r in seed_results], axis=0),
                     'null_rot_mean': np.mean([r['null_rot_mean'] for r in seed_results], axis=0),

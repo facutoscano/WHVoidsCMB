@@ -68,7 +68,7 @@ config = {
     'run_step_3': False,
     '''
 
-    'force_rerun': True
+    'force_rerun': False
 }
 
 #%% Auxiliary functions
