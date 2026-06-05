@@ -22,27 +22,27 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'N_seeds': 10,                      # Number of random seeds used to identify voids. 
+    'N_seeds': 20,                      # Number of random seeds used to identify voids. 
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
     'delta_value': None,                # If None = no filter. 
                                         # If it is positive only voids with delta_LOS > delta_value are considered. 
                                         # If it is negative, only voids with delta_LOS < delta_value are considered
     
-    'zmin': 0.05, 'zmax': 0.583,        # zmin = 0.051 zmax = 0.583 
-    'rmin': 35.0, 'rmax': 62.7,         # Mpc/h , rmin=35 rmax=62.7
+    'zmin': 0.1, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
+    'rmin': 35.0, 'rmax': 70,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
     'Rvoid_bin': 0.1,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
-    'smooth_value_arcmin': 1.0,        # Just used if filter_mode is 'gaussian'
+    'smooth_value_arcmin': 20.0,        # Just used if filter_mode is 'gaussian'
     'sigma_miscentering': 0.0,
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 4,                        
+    'n_bins': 1,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  
@@ -51,8 +51,8 @@ config = {
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
     'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 1,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
-    'n_rotations': 1,                  # Number of random rotations of the cmb map for cosmic variance estimation
+    'n_rand_factor': 10,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
+    'n_rotations': 10,                  # Number of random rotations of the cmb map for cosmic variance estimation
     
     # MCMC setup
     'mcmc_walkers': 32, 
