@@ -26,8 +26,8 @@ config = {
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
     'delta_value': None,                # If None = no filter. 
-                                        # If it is positive only voids with delta_LOS > delta_value are considered. 
-                                        # If it is negative, only voids with delta_LOS < delta_value are considered
+                                        # If it is positive only voids with delta_23 > delta_value are considered. 
+                                        # If it is negative, only voids with delta_23 < delta_value are considered
     
     'zmin': 0.1, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 70,         # Mpc/h , rmin=35 rmax=62.7

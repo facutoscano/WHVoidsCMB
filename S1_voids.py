@@ -13,10 +13,8 @@ def run_pipeline(config):
     data_folder = config['data_folder']
     output_folder = config['output_folder']
     release = config['release']
-    zmin = config['zmin']
-    zmax = config['zmax']
-    rmin = config['rmin']
-    rmax = config['rmax']
+    zmin, zmax = config['zmin'], config['zmax']
+    rmin, rmax = config['rmin'], config['rmax']
 
     max_Rvoid = config['max_Rvoid']
     Rvoid_bin = config['Rvoid_bin']
@@ -34,14 +32,14 @@ def run_pipeline(config):
     n_rotations = config.get('n_rotations', 10)
     
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
-    delta_LOS_value = config.get('delta_value', None)
+    delta_23_value = config.get('delta_value', None)
     
-    if delta_LOS_value is None:
-        delta_label = "dLOS_all"
-    elif delta_LOS_value > 0:
-        delta_label = f"dLOS_gt{delta_LOS_value:.2f}"
+    if delta_23_value is None:
+        delta_label = "d23_all"
+    elif delta_23_value > 0:
+        delta_label = f"d23_gt{delta_23_value:.2f}"
     else:
-        delta_label = f"dLOS_lt{abs(delta_LOS_value):.2f}"
+        delta_label = f"d23_lt{abs(delta_23_value):.2f}"
 
     filter_label = config.get('filter_mode', 'none')
     if filter_label == 'gaussian':
@@ -96,13 +94,13 @@ def run_pipeline(config):
     print('Reading Wen-Han voids catalogue...')
     n_seeds = config.get('N_seeds', None)
 
-    def apply_delta_LOS_filter(df, delta_value):
+    def apply_delta_23_filter(df, delta_value):
         if delta_value is None:
             return df
         elif delta_value >= 0:
-            return df[df['delta_LOS'] > delta_value]
+            return df[df['delta_23'] > delta_value]
         else:
-            return df[df['delta_LOS'] < delta_value]
+            return df[df['delta_23'] < delta_value]
 
     if n_seeds is not None:
         print(f"Reading {n_seeds} voids catalogues identified with different random seeds...")
@@ -115,7 +113,7 @@ def run_pipeline(config):
             
             base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2)
             filtered_data = voids_data[seed][base_filter].copy()
-            final_data[seed] = apply_delta_LOS_filter(filtered_data, delta_LOS_value)
+            final_data[seed] = apply_delta_23_filter(filtered_data, delta_23_value)
         print('All voids data loaded.\n')
     else:
         col_names = ['R_void', 'l', 'b', 'z']
@@ -209,9 +207,11 @@ def run_pipeline(config):
                 force_rerun=config.get('force_rerun', False)
             )
 
-            result['bin_id'] = info['id']
-            result['binning_mode'] = binning_mode
-            result['is_multi_seed'] = False
+            result.update({
+                'bin_id': info['id'],
+                'binning_mode': binning_mode,
+                'is_multi_seed': False
+                })
             bin_results_list.append(result)
     else:
         for info in bins_info_list:
@@ -246,10 +246,8 @@ def run_pipeline(config):
                 seed_results.append(result)
             
             if len(seed_results) > 0:
-                z_means_all = [r['z_mean'] for r in seed_results if 'z_mean' in r]
                 z_min_combined = np.min([sd['z_range'][0] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
                 z_max_combined = np.max([sd['z_range'][1] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
-
                 all_data_bin = pd.concat([info['data'][s]['data'] for s in range(n_seeds) if len(info['data'][s]['data']) > 0], ignore_index=True)
                 all_l = all_data_bin['l'].values
                 all_b = all_data_bin['b'].values
@@ -268,20 +266,13 @@ def run_pipeline(config):
                     max_Rvoid=max_Rvoid, npix_stamp=npix_stamp, nside=nside,        bins_frac=bins_frac, lensing_map=lensing_map,        common_mask=common_mask,        stacks_cache_folder=combined_cache_folder,        n_random_factor=random_factor, n_rotations=n_rotations,        n_subsamples=n_subsamples,
                     delta_label=delta_label, filter_label=filter_label,        force_rerun=config.get('force_rerun', False))
                 
-                combined_result = {
-                    'bin_id':       bin_id,
-                    'key':          f"{z_min_combined:.2f}_{z_max_combined:.2f}",
+                result_combined.update({
+                    'bin_id': bin_id,
                     'binning_mode': binning_mode,
                     'is_multi_seed': True,
-                    'seed_results': seed_results,
-                    'z_mean':       result_combined['z_mean'],
-                    'n_voids':      result_combined['n_voids'],
-                    'map':          result_combined['map'],
-                    'r_frac':       result_combined['r_frac'],
-                    'profile':      result_combined['profile'],        'error':        result_combined['error'],
-                    'cov_matrix':   result_combined['cov_matrix'],        'jk_profiles':  result_combined['jk_profiles'],        'null_rand_mean': result_combined['null_rand_mean'],        'null_rand_std':  result_combined['null_rand_std'],        'null_rot_mean':  result_combined['null_rot_mean'],        'null_rot_std':   result_combined['null_rot_std']
-                }
-                bin_results_list.append(combined_result)         
+                    'seed_results': seed_results
+                    })
+                bin_results_list.append(result_combined)         
 
     # SAVING
     print('Saving results...')
@@ -297,10 +288,9 @@ def run_pipeline(config):
         fm.plot_seed_consistency(bin_results_list, seeds_plot_path, max_Rvoid)
 
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
-    save_dict = {'bins_data': bin_results_list, 'parameters': config}
-    with open(data_save_path, 'wb') as f:
-        pickle.dump(save_dict, f)
-    print(f"Data saved in: {data_save_path}")
+    with open(data_save_path, 'wb') as f: 
+        pickle.dump({'bins_data': bin_results_list, 'parameters': config}, f)
+        print(f"Data saved in: {data_save_path}")
 
 if __name__ == "__main__":
     print("Please run from PIPELINE_SCRIPT.py")

@@ -11,9 +11,8 @@ import pandas as pd
 import pickle
 from astropy import units as u
 from astropy.cosmology import Planck18
-from astropy.coordinates import SkyCoord
-from scipy.ndimage import gaussian_filter
 from sklearn.cluster import KMeans
+import warnings
 
 plt.rcParams.update({
     'font.size': 12, 'font.family': 'serif',             
@@ -81,6 +80,7 @@ def generate_random(mask, n_random, nside):
         count = len(valid_l)
     return np.array(valid_l[:n_random]), np.array(valid_b[:n_random])
 
+
 def rotate_map(map_data, rot_angles):
     nside = hp.npix2nside(len(map_data))
     npix = hp.nside2npix(nside)
@@ -146,10 +146,17 @@ def radial_profile_flat(stack_map, max_Rvoid, bins_frac, silent=False):
 
     return profile, r_centers
 
-def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations):
-    print(f'Performing null test with {n_rotations} random rotations of the CMB map...')
-    null_profiles = []
-    angles = np.linspace(360/n_rotations, 360, n_rotations, endpoint=False)
+
+def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_profiles=[]):
+    n_old = len(existing_profiles)
+    if n_rotations <= n_old:
+        return np.array(existing_profiles[:n_rotations])
+    
+    print(f'Performing {n_rotations - n_old} additional random rotations of the CMB map...')
+    null_profiles = list(existing_profiles)
+
+    np.random.seed(42+n_old)
+    angles = np.random.uniform(10, 350, n_rotations-n_old)
 
     for i, ang in enumerate(angles):
         rot_cmb = rotate_map(cmb_map, rot_angles=[ang, 0, 0])
@@ -161,23 +168,27 @@ def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, survey_mask
         null_profiles.append(prof_null)
 
     null_profiles = np.array(null_profiles)
-    return np.nanmean(null_profiles, axis=0), np.nanstd(null_profiles, axis=0)
+    return null_profiles
 
-def null_test_randoms(nside, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor):
-    print(f'Performing null test with {n_random_factor} random positions per void...')
-    null_profiles = []
+
+def null_test_randoms(nside, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_profiles=[]):
+    n_old = len(existing_profiles)
+    if n_random_factor <= n_old:
+        return np.array(existing_profiles[:n_random_factor])
+    
+    print(f'Performing {n_random_factor-n_old} random positions per void...')
+    null_profiles = list(existing_profiles)
     n_voids = len(redshifts)
 
-    for i in range(n_random_factor):
+    for i in range(n_random_factor - n_old):
         rand_l, rand_b = generate_random(mask, n_voids, nside)
         rand_idx = np.random.permutation(n_voids)
-
         stack_null, _ = stacking_gnomonic(rand_l, rand_b, redshifts[rand_idx], r_voids[rand_idx], cmb_map, mask, max_Rvoid, npix_stamp, range(n_voids))
         prof_null, _ = radial_profile_flat(stack_null, max_Rvoid, bins_frac, silent=True)
         null_profiles.append(prof_null)
 
     null_profiles = np.array(null_profiles)
-    return np.nanmean(null_profiles, axis=0), np.nanstd(null_profiles, axis=0)
+    return null_profiles
 
 
 def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples=20):
@@ -232,51 +243,79 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
     survey_mask = footprint_mask(l, b, output_nside=nside, footprint_nside=16)
     effective_mask = common_mask * survey_mask
 
-    # Null tests
-    cache_file = os.path.join(stacks_cache_folder,
-    f'null_tests_{release}_{z_text}_{delta_label}_{filter_label}_'
-    f'maxRv{max_Rvoid:.1f}_'
-    f'nrand{n_random_factor}_nrot{n_rotations}.npz')
+    n_rotations = n_rotations if n_rotations is not None else 0
+    n_random_factor = n_random_factor if n_random_factor is not None else 0
 
-    if os.path.exists(cache_file) and not force_rerun:
-        print(f'Loading null test results from cache: {cache_file}')
-        data_cache = np.load(cache_file)
-        null_rot_mean, null_rot_std = data_cache['null_rot_mean'], data_cache['null_rot_std']
-        null_rand_mean, null_rand_std = data_cache['null_rand_mean'], data_cache['null_rand_std']
+    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.pkl')
+
+    if not force_rerun and os.path.exists(signal_cache_file):
+        with open(signal_cache_file, 'rb') as f:
+            cached_data = pickle.load(f)
+        
+        cached_nrot = cached_data.get('n_rotations_done', 0)
+        cached_nrand = cached_data.get('n_randoms_done', 0)
+
+        if cached_nrot >= n_rotations and cached_nrand >= n_random_factor:
+            print(f'Loading fully cached signal and null tests from {signal_cache_file}.')
+            return cached_data
+        else:
+            print(f'Signal found in cache, but more null tests requested. Updating...')
+            signal_data = cached_data
     else:
-        null_rot_mean, null_rot_std = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations)
-        null_rand_mean, null_rand_std = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor)
-        np.savez(cache_file, null_rot_mean=null_rot_mean, null_rot_std=null_rot_std, null_rand_mean=null_rand_mean, null_rand_std=null_rand_std)
-        print(f'Null test results saved to cache: {cache_file}')
+        signal_data = None
 
-    # Signal
-    print('Computing mean random stack for signal estimation...')
-    stack_cl, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, range(n_voids))
-    signal_map = stack_cl
+    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.npz')
+
+    existing_rot, existing_rand = [], []
+    if not force_rerun and os.path.exists(null_cache_file):
+        data_cache = np.load(null_cache_file)
+        if 'null_profiles_rot' in data_cache: existing_rot = list(data_cache['null_profiles_rot'])
+        if 'null_profiles_rand' in data_cache: existing_rand = list(data_cache['null_profiles_rand'])
+    
+    null_profiles_rot = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_rot) if n_rotations > 0 else np.array([])
+    null_profiles_rand = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_rand) if n_random_factor > 0 else np.array([])
+
+    if n_rotations > 0 or n_random_factor > 0:
+        np.savez(null_cache_file, null_profiles_rot=null_profiles_rot, null_profiles_rand= null_profiles_rand)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=RuntimeWarning)
+        null_rot_mean = np.nanmean(null_profiles_rot, axis=0) if len(null_profiles_rot) > 0 else np.full(len(bins_frac) -1, np.nan)
+        null_rot_std = np.nanstd(null_profiles_rot, axis=0) if len(null_profiles_rot) > 0 else np.full(len(bins_frac) -1, np.nan)
+        null_rand_mean = np.nanmean(null_profiles_rand, axis=0) if len(null_profiles_rand) > 0 else np.full(len(bins_frac)-1, np.nan)
+        null_rand_std = np.nanstd(null_profiles_rand, axis=0) if len(null_profiles_rand) > 0 else np.full(len(bins_frac)-1, np.nan)
+
+    if signal_data is not None:
+        signal_data.update({
+            'null_rot_mean': null_rot_mean, 'null_rot_std': null_rot_std,
+            'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
+            'n_rotations_done': max(n_rotations, signal_data.get('n_rotations_done', 0)), 'n_randoms_done': max(n_random_factor, signal_data.get('n_randoms_done', 0))
+        })
+        with open(signal_cache_file, 'wb') as f: pickle.dump(signal_data, f)
+        return signal_data
+    
+    print('Computing signal stack and errors...')
+    signal_map, _ = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, range(n_voids))
 
     prof_total, r_frac = radial_profile_flat(signal_map, max_Rvoid, bins_frac)
-    jk_profiles = None
-    cov_matrix = None
+    jk_profiles, cov_matrix = None, None
     if mode == 'errors':
         _, prof_err, jk_profiles, cov_matrix = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples)
     else:
         prof_err = np.zeros_like(prof_total)
 
-    return {
-        'z_mean': z_mean, 
-        'map': signal_map, 
-        'r_frac': r_frac, 
-        'profile': prof_total, 
-        'error': prof_err,
-        'jk_profiles': jk_profiles,
-        'cov_matrix': cov_matrix,
-        'null_rot_mean': null_rot_mean,
-        'null_rot_std': null_rot_std,
-        'null_rand_mean': null_rand_mean,
-        'null_rand_std': null_rand_std,
-        'n_voids': n_voids, 
-        'key': z_text
-        }
+    final_result = {
+        'z_mean': z_mean, 'map': signal_map, 'r_frac': r_frac, 'profile': prof_total, 
+        'error': prof_err, 'jk_profiles': jk_profiles, 'cov_matrix': cov_matrix,
+        'null_rot_mean': null_rot_mean, 'null_rot_std': null_rot_std,
+        'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
+        'n_voids': n_voids, 'key': z_text, 'n_rotations_done': n_rotations, 'n_randoms_done': n_random_factor
+    }
+
+    with open(signal_cache_file, 'wb') as f:
+        pickle.dump(final_result, f)
+
+    return final_result
 
 def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     n_bins = len(data_list)
@@ -286,8 +325,7 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
                            hspace=0.3, wspace=0.15)
 
     all_maps = np.array([d['map'] for d in data_list])
-    v_max = np.percentile(all_maps, 99.5)
-    v_min = np.percentile(all_maps, 0.5)
+    v_max, v_min = np.percentile(all_maps, 99.5), np.percentile(all_maps, 0.5)
     extent = [-max_Rvoid, max_Rvoid, -max_Rvoid, max_Rvoid]
 
     # Mapas
@@ -311,16 +349,17 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[1, i])
 
-        ax.fill_between(data['r_frac'],
-                        (data['null_rand_mean'] - data['null_rand_std']) * 1e3,
-                        (data['null_rand_mean'] + data['null_rand_std']) * 1e3,
-                        color='xkcd:grey', alpha=0.5, zorder=1,
-                        label=r'$1\sigma$ randoms')
-        ax.fill_between(data['r_frac'],
-                        (data['null_rot_mean'] - data['null_rot_std']) * 1e3,
-                        (data['null_rot_mean'] + data['null_rot_std']) * 1e3,
-                        color='xkcd:salmon', alpha=0.5, zorder=2,
-                        label=r'$1\sigma$ rotations')
+        if not np.all(np.isnan(data.get('null_rand_mean', np.nan))):
+            ax.fill_between(data['r_frac'],
+                            (data['null_rand_mean'] - data['null_rand_std']) * 1e3,
+                            (data['null_rand_mean'] + data['null_rand_std']) * 1e3,
+                            color='xkcd:grey', alpha=0.5, zorder=1, label=r'$1\sigma$ randoms')
+        if not np.all(np.isnan(data.get('null_rot_mean', np.nan))):
+            ax.fill_between(data['r_frac'],
+                            (data['null_rot_mean'] - data['null_rot_std']) * 1e3,
+                            (data['null_rot_mean'] + data['null_rot_std']) * 1e3,
+                            color='xkcd:salmon', alpha=0.5, zorder=2,
+                            label=r'$1\sigma$ rotations')
 
         ax.axhline(0,   color='k',    linestyle=':',  alpha=0.6, zorder=3)
         ax.axvline(1.0, color='gray', linestyle='--', alpha=0.8, zorder=3)
@@ -333,9 +372,12 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
         ax.set_xlabel(r'$r\,/\,R_v$')
         ax.set_xlim(-0.1, max_Rvoid + 0.1)
         ax.grid(True, alpha=0.25)
+
         if i == 0:
             ax.set_ylabel(r'$\kappa\;[10^{-3}]$')
-            ax.legend(loc='lower right', frameon=True, fontsize=9)
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc='lower right', frameon=True, fontsize=9)
         else:
             ax.tick_params(labelleft=False)
 
@@ -346,135 +388,72 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
 
 def plot_jackknife_and_correlation(bin_results_list, output_path, max_Rvoid):
     n_bins = len(bin_results_list)
-    fig, axes = plt.subplots(2, n_bins,
-                             figsize=(5.5 * n_bins, 9),
-                             gridspec_kw={'hspace': 0.35, 'wspace': 0.2})
-
-    if n_bins == 1:
-        axes = axes[:, np.newaxis]
+    fig, axes = plt.subplots(2, n_bins, figsize=(5.5 * n_bins, 9), gridspec_kw={'hspace': 0.35, 'wspace': 0.2})
+    if n_bins == 1: axes = axes[:, np.newaxis]
 
     for col, data in enumerate(bin_results_list):
-        r_frac  = data['r_frac']
-        profile = data['profile']
-        error   = data['error']
-        cov     = data.get('cov_matrix')
-        label   = data.get('key', f"Bin {col+1}")
-        z_mean  = data['z_mean']
-        n_voids = data.get('n_voids', '?')
-        is_ms   = data.get('is_multi_seed', False)
+        r_frac, profile, error, cov = data['r_frac'], data['profile'], data['error'], data.get('cov_matrix')
+        label, z_mean, n_voids, is_ms = data.get('key', f"Bin {col+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('is_multi_seed', False)
 
-        # Perfil
         ax_p = axes[0, col]
-        ax_p.axhline(0,   color='k',    linestyle=':',  alpha=0.5, linewidth=1)
+        ax_p.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
         ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
-        ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3,
-                      fmt='o-', color='xkcd:steel blue',
-                      capsize=3, linewidth=1.8,
-                      label='Signal (JK err.)')
+        ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3, fmt='o-', color='xkcd:steel blue', capsize=3, linewidth=1.8, label='Signal (JK err.)')
         ax_p.set_xlim(-0.05, max_Rvoid + 0.05)
         ax_p.set_xlabel(r'$r\,/\,R_v$')
         ax_p.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})")
         ax_p.grid(True, alpha=0.25)
         ax_p.legend(loc='lower right', frameon=True, fontsize=9)
-        if col == 0:
-            ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
-        else:
-            ax_p.tick_params(labelleft=False)
+        if col == 0: ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        else: ax_p.tick_params(labelleft=False)
 
-        # Matriz de correlación
         ax_c = axes[1, col]
         if cov is not None:
             std = np.sqrt(np.diag(cov))
-            with np.errstate(invalid='ignore'):
-                corr = cov / np.outer(std, std)
+            with np.errstate(invalid='ignore'): corr = cov / np.outer(std, std)
             corr = np.nan_to_num(corr)
-
-            im = ax_c.imshow(corr, origin='lower', cmap='RdBu_r',
-                             vmin=-1, vmax=1,
-                             extent=[r_frac[0], r_frac[-1],
-                                     r_frac[0], r_frac[-1]],
-                             aspect='auto')
-            plt.colorbar(im, ax=ax_c, label='Correlation',
-                         fraction=0.046, pad=0.04)
+            im = ax_c.imshow(corr, origin='lower', cmap='RdBu_r', vmin=-1, vmax=1, extent=[r_frac[0], r_frac[-1], r_frac[0], r_frac[-1]], aspect='auto')
+            plt.colorbar(im, ax=ax_c, label='Correlation', fraction=0.046, pad=0.04)
             ax_c.set_xlabel(r'$r\,/\,R_v$')
-            corr_label = ('Seed-to-seed corr.' if is_ms
-                          else 'JK correlation matrix')
-            ax_c.set_title(f'{corr_label} — Bin {label}')
-            if col == 0:
-                ax_c.set_ylabel(r'$r\,/\,R_v$')
-            else:
-                ax_c.tick_params(labelleft=False)
+            ax_c.set_title(f"{'Seed-to-seed corr.' if is_ms else 'JK correlation matrix'} — Bin {label}")
+            if col == 0: ax_c.set_ylabel(r'$r\,/\,R_v$')
+            else: ax_c.tick_params(labelleft=False)
         else:
-            ax_c.text(0.5, 0.5, 'No covariance data',
-                      ha='center', va='center',
-                      transform=ax_c.transAxes,
-                      fontsize=11, color='gray')
+            ax_c.text(0.5, 0.5, 'No covariance data', ha='center', va='center', transform=ax_c.transAxes, fontsize=11, color='gray')
             ax_c.set_axis_off()
 
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
-    print(f"JK profile + correlation plot saved to {output_path}")
     plt.close()
 
 
 def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
-    ms_bins = [d for d in bin_results_list if d.get('is_multi_seed', False)
-               and d.get('seed_results') is not None]
-
-    if len(ms_bins) == 0:
-        print("No multi-seed bins found, skipping seed consistency plot.")
-        return
+    ms_bins = [d for d in bin_results_list if d.get('is_multi_seed', False) and d.get('seed_results') is not None]
+    if len(ms_bins) == 0: return
 
     n_bins = len(ms_bins)
-    fig, axes = plt.subplots(1, n_bins,
-                             figsize=(6 * n_bins, 5),
-                             sharey=False)
-
-    if n_bins == 1:
-        axes = [axes]
+    fig, axes = plt.subplots(1, n_bins, figsize=(6 * n_bins, 5), sharey=False)
+    if n_bins == 1: axes = [axes]
 
     for col, data in enumerate(ms_bins):
-        ax = axes[col]
-        seed_results = data['seed_results']
-        r_frac  = data['r_frac']
+        ax, seed_results, r_frac = axes[col], data['seed_results'], data['r_frac']
         n_seeds = len(seed_results)
-
         colors = cm.plasma(np.linspace(0.05, 0.85, n_seeds))
 
         for j, s_res in enumerate(seed_results):
-            ax.plot(r_frac, s_res['profile'] * 1e3,
-                    color=colors[j], alpha=0.4, linewidth=1.0,
-                    label=f'Seed {j+1}' if n_seeds <= 10 else None)
+            ax.plot(r_frac, s_res['profile'] * 1e3, color=colors[j], alpha=0.4, linewidth=1.0, label=f'Seed {j+1}' if n_seeds <= 10 else None)
 
-        ax.errorbar(r_frac, data['profile'] * 1e3,
-                    yerr=data['error'] * 1e3,
-                    fmt='o-', color='black', linewidth=2.0,
-                    capsize=3, zorder=5,
-                    label='Combined (JK err.)')
-
-        ax.axhline(0,   color='k',    linestyle=':',  alpha=0.4, linewidth=1)
+        ax.errorbar(r_frac, data['profile'] * 1e3, yerr=data['error'] * 1e3, fmt='o-', color='black', linewidth=2.0, capsize=3, zorder=5, label='Combined (JK err.)')
+        ax.axhline(0, color='k', linestyle=':', alpha=0.4, linewidth=1)
         ax.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
-
-        label   = data.get('key', f"Bin {col+1}")
-        z_mean  = data['z_mean']
-        n_voids = data.get('n_voids', '?')
-        ax.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})\n"
-                     f"{n_seeds} seeds")
+        ax.set_title(f"Bin {data.get('key', f'Bin {col+1}')}  (z={data['z_mean']:.3f}, N={data.get('n_voids', '?')})\n{n_seeds} seeds")
         ax.set_xlabel(r'$r\,/\,R_v$')
         ax.set_xlim(-0.05, max_Rvoid + 0.05)
         ax.grid(True, alpha=0.25)
 
-        if col == 0:
-            ax.set_ylabel(r'$\kappa\;[10^{-3}]$')
-        else:
-            ax.tick_params(labelleft=False)
-
-        if n_seeds <= 10:
-            ax.legend(loc='lower right', frameon=True, fontsize=8,
-                      ncol=2)
-        else:
-            ax.legend(loc='lower right', frameon=True, fontsize=9)
+        if col == 0: ax.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        else: ax.tick_params(labelleft=False)
+        ax.legend(loc='lower right', frameon=True, fontsize=8 if n_seeds <= 10 else 9, ncol=2 if n_seeds <= 10 else 1)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
-    print(f"Seed consistency plot saved to {output_path}")
     plt.close()
