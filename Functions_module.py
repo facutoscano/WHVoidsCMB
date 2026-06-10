@@ -234,8 +234,9 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
     return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles, cov_matrix
 
 
-def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='dLOS_all', filter_label='none', force_rerun=False):
+def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='d23_all', filter_label='none', force_rerun=False):
     z_text = f'{z_min:.2f}_{z_max:.2f}'
+    r_text = f'{r_min:.1f}_{r_max:.1f}'
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
     
@@ -246,7 +247,7 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
     n_rotations = n_rotations if n_rotations is not None else 0
     n_random_factor = n_random_factor if n_random_factor is not None else 0
 
-    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.pkl')
+    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.pkl')
 
     if not force_rerun and os.path.exists(signal_cache_file):
         with open(signal_cache_file, 'rb') as f:
@@ -264,7 +265,7 @@ def process_bin_stacking(release, mode, z_min, z_max, data_sample_bin, coords_bi
     else:
         signal_data = None
 
-    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.npz')
+    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.npz')
 
     existing_rot, existing_rand = [], []
     if not force_rerun and os.path.exists(null_cache_file):

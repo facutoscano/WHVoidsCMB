@@ -189,7 +189,9 @@ def run_pipeline(config):
                 release=release,
                 mode=exec_mode,
                 z_min=z_bin_min, 
-                z_max=z_bin_max, 
+                z_max=z_bin_max,
+                r_min= rmin,
+                r_max=rmax, 
                 data_sample_bin=data_bin, 
                 coords_bin=coords_bin,
                 max_Rvoid=max_Rvoid, 
@@ -235,7 +237,8 @@ def run_pipeline(config):
                     os.makedirs(seed_cache_folder)
                 
                 result = fm.process_bin_stacking(
-                    release=release, mode=exec_mode, z_min=z_bin_min, z_max=z_bin_max, 
+                    release=release, mode=exec_mode, 
+                    z_min=z_bin_min, z_max=z_bin_max, r_min=rmin, r_max=rmax, 
                     data_sample_bin=data_bin, coords_bin=coords_bin, max_Rvoid=max_Rvoid, 
                     npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac, 
                     lensing_map=lensing_map, common_mask=common_mask, 
@@ -259,12 +262,16 @@ def run_pipeline(config):
                 if not os.path.exists(combined_cache_folder):
                     os.makedirs(combined_cache_folder)
 
-                result_combined = fm.process_bin_stacking(
-                    release=release, mode=exec_mode,
-                    z_min=z_min_combined, z_max=z_max_combined,       data_sample_bin=all_data_bin,
-                    coords_bin=coords_combined,
-                    max_Rvoid=max_Rvoid, npix_stamp=npix_stamp, nside=nside,        bins_frac=bins_frac, lensing_map=lensing_map,        common_mask=common_mask,        stacks_cache_folder=combined_cache_folder,        n_random_factor=random_factor, n_rotations=n_rotations,        n_subsamples=n_subsamples,
-                    delta_label=delta_label, filter_label=filter_label,        force_rerun=config.get('force_rerun', False))
+                result_combined = fm.process_bin_stacking(release=release, mode=exec_mode,
+                                                          z_min=z_min_combined, z_max=z_max_combined, r_min= rmin, r_max=rmax,
+                                                          data_sample_bin=all_data_bin, 
+                                                          coords_bin=coords_combined, max_Rvoid=max_Rvoid, 
+                                                          npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac, 
+                                                          lensing_map=lensing_map, common_mask=common_mask,
+                                                          stacks_cache_folder=combined_cache_folder,
+                                                          n_random_factor=random_factor, n_rotations=n_rotations, n_subsamples=n_subsamples,
+                                                          delta_label=delta_label, filter_label=filter_label,
+                                                          force_rerun=config.get('force_rerun', False))
                 
                 result_combined.update({
                     'bin_id': bin_id,
