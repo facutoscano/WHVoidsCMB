@@ -320,16 +320,18 @@ def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_
 
 def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     n_bins = len(data_list)
-    fig = plt.figure(figsize=(6 * n_bins, 9))
-    gs = gridspec.GridSpec(2, n_bins + 1,
+    fig = plt.figure(figsize=(6 * n_bins, 12))
+    
+    gs = gridspec.GridSpec(3, n_bins + 1,
+                           height_ratios=[1.2, 1.2, 0.6], 
                            width_ratios=[1] * n_bins + [0.05],
-                           hspace=0.3, wspace=0.15)
+                           hspace=0.35, wspace=0.15)
 
     all_maps = np.array([d['map'] for d in data_list])
     v_max, v_min = np.percentile(all_maps, 99.5), np.percentile(all_maps, 0.5)
     extent = [-max_Rvoid, max_Rvoid, -max_Rvoid, max_Rvoid]
 
-    # Mapas
+    # Maps
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[0, i])
         im = ax.imshow(data['map'], origin='lower', cmap='viridis',
@@ -337,7 +339,8 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
         n_voids = data.get('n_voids', '?')
         ax.set_title(f"Bin {data.get('key', i+1)}\n"
                      f"z={data['z_mean']:.3f}, N={n_voids}")
-        ax.set_xlabel(r'$r\,/\,R_v$')
+        
+        ax.tick_params(labelbottom=False) 
         if i == 0:
             ax.set_ylabel(r'$r\,/\,R_v$')
         else:
@@ -346,16 +349,17 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     cax = fig.add_subplot(gs[0, -1])
     plt.colorbar(im, cax=cax, label=r'$\kappa$')
 
-    # Perfiles con null tests
+    # Profiles
     for i, data in enumerate(data_list):
         ax = fig.add_subplot(gs[1, i])
 
-        if not np.all(np.isnan(data.get('null_rand_mean', np.nan))):
+        if 'null_rand_mean' in data and not np.all(np.isnan(data['null_rand_mean'])):
             ax.fill_between(data['r_frac'],
                             (data['null_rand_mean'] - data['null_rand_std']) * 1e3,
                             (data['null_rand_mean'] + data['null_rand_std']) * 1e3,
                             color='xkcd:grey', alpha=0.5, zorder=1, label=r'$1\sigma$ randoms')
-        if not np.all(np.isnan(data.get('null_rot_mean', np.nan))):
+            
+        if 'null_rot_mean' in data and not np.all(np.isnan(data['null_rot_mean'])):
             ax.fill_between(data['r_frac'],
                             (data['null_rot_mean'] - data['null_rot_std']) * 1e3,
                             (data['null_rot_mean'] + data['null_rot_std']) * 1e3,
@@ -365,13 +369,30 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
         ax.axhline(0,   color='k',    linestyle=':',  alpha=0.6, zorder=3)
         ax.axvline(1.0, color='gray', linestyle='--', alpha=0.8, zorder=3)
 
-        ax.errorbar(data['r_frac'], data['profile'] * 1e3,
-                    yerr=data['error'] * 1e3,
-                    fmt='o-', color='xkcd:steel blue', capsize=3,
-                    linewidth=1.8, zorder=4, label='Signal (JK err.)')
+        raw_profile = data['profile']
+        if 'null_rand_mean' in data and not np.all(np.isnan(data['null_rand_mean'])):
+            clean_profile = raw_profile - data['null_rand_mean']
+            
+            n_rands = data.get('n_randoms_done', 100) 
+            
+            err_rand_mean = data['null_rand_std'] / np.sqrt(n_rands)
+            
+            net_error = np.sqrt(data['error']**2 + err_rand_mean**2)
+        else:
+            clean_profile = raw_profile
+            net_error = data['error']
 
-        ax.set_xlabel(r'$r\,/\,R_v$')
+        ax.plot(data['r_frac'], raw_profile * 1e3, '-', 
+                color='xkcd:dark grey', alpha=0.8, linewidth=1.5, zorder=3,
+                label='Raw Profile')
+
+        ax.errorbar(data['r_frac'], clean_profile * 1e3,
+                    yerr=net_error * 1e3,
+                    fmt='o-', color='xkcd:steel blue', capsize=3,
+                    linewidth=1.8, zorder=4, label='Net Signal')
+
         ax.set_xlim(-0.1, max_Rvoid + 0.1)
+        ax.tick_params(labelbottom=False)
         ax.grid(True, alpha=0.25)
 
         if i == 0:
@@ -382,8 +403,44 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
         else:
             ax.tick_params(labelleft=False)
 
+    # Significance (S/N)
+    for i, data in enumerate(data_list):
+        ax_sig = fig.add_subplot(gs[2, i])
+        
+        raw_profile = data['profile']
+        if 'null_rand_mean' in data and not np.all(np.isnan(data['null_rand_mean'])):
+            clean_profile = raw_profile - data['null_rand_mean']
+            n_rands = data.get('n_randoms_done', 100)
+            net_error = np.sqrt(data['error']**2 + (data['null_rand_std'] / np.sqrt(n_rands))**2)
+        else:
+            clean_profile = raw_profile
+            net_error = data['error']
+            
+        with np.errstate(divide='ignore', invalid='ignore'):
+            significance = clean_profile / net_error
+            
+        ax_sig.plot(data['r_frac'], significance, 'o-', color='xkcd:crimson', 
+                    markersize=5, linewidth=1.5)
+        
+        ax_sig.axhline(0, color='black', linestyle='-', alpha=0.5)
+        ax_sig.axhline(2, color='gray', linestyle='--', alpha=0.8)
+        ax_sig.axhline(-2, color='gray', linestyle='--', alpha=0.8)
+        
+        ax_sig.axhspan(-2, 2, color='gray', alpha=0.1, zorder=0)
+        
+        ax_sig.set_ylim(-5, 5)
+        ax_sig.set_xlim(-0.1, max_Rvoid + 0.1)
+        
+        ax_sig.set_xlabel(r'$r\,/\,R_v$')
+        ax_sig.grid(True, alpha=0.25)
+
+        if i == 0:
+            ax_sig.set_ylabel(r'$S/N\;(\sigma)$')
+        else:
+            ax_sig.tick_params(labelleft=False)
+
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Stacked maps + profiles plot saved to {output_path}")
+    print(f"Stacked maps + profiles + significance plot saved to {output_path}")
     plt.close()
 
 
