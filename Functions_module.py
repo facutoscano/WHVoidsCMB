@@ -161,7 +161,7 @@ def radial_profile_weighted(sum_map, count_map, max_Rvoid, bins_frac, silent=Fal
     return np.array(profile), np.array(r_centers)
 
 
-def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, survey_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_profiles=[]):
+def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_profiles=[]):
     n_old = len(existing_profiles)
     if n_rotations <= n_old:
         return np.array(existing_profiles[:n_rotations])
