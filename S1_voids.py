@@ -111,7 +111,7 @@ def run_pipeline(config):
             file_path = f'{data_folder}/CATALOGOS/WenHan_voids_z0.6/voids_z0.6_{(seed+1):03d}.dat'
             voids_data[seed] = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
             
-            base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] == 2)
+            base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] > 1.9)
             filtered_data = voids_data[seed][base_filter].copy()
             final_data[seed] = apply_delta_23_filter(filtered_data, delta_23_value)
         print('All voids data loaded.\n')
