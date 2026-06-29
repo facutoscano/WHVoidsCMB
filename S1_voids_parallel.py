@@ -1,4 +1,7 @@
 #%% IMPORTS
+# Parallel twin of S1_voids.py: identical data loading / binning / plotting,
+# but the per-bin stacking is delegated to Parallel_module.process_bin_stacking_parallel
+# (random null, rotation null and jackknife/signal region stacks run across CPU cores).
 import os
 import numpy as np
 import healpy as hp
@@ -7,6 +10,7 @@ import pickle
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 import Functions_module as fm
+import Parallel_module as pm
 
 #%% Run pipeline function
 def run_pipeline(config):
@@ -19,7 +23,7 @@ def run_pipeline(config):
     max_Rvoid = config['max_Rvoid']
     Rvoid_bin = config['Rvoid_bin']
     npix_stamp = config['npix_stamp']
-    
+
     bins_frac = np.arange(0, max_Rvoid + Rvoid_bin, Rvoid_bin)
     reso_rv_per_pix = (2 * max_Rvoid) / npix_stamp
     smooth_value_deg = config.get('smooth_value_arcmin', 0.0) / 60.0
@@ -32,10 +36,11 @@ def run_pipeline(config):
     n_rotations = config.get('n_rotations', 10)
     random_pool = config.get('random_pool', 'full')
     random_excl_factor = config.get('random_excl_factor', 1.0)
-    
+    n_workers = config.get('n_workers', None)
+
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
     delta_23_value = config.get('delta_value', None)
-    
+
     if delta_23_value is None:
         delta_label = "d23_all"
     elif delta_23_value > 0:
@@ -55,17 +60,17 @@ def run_pipeline(config):
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
                    f'{delta_label}_{filter_label}')
-    
+
     run_folder = os.path.join(output_folder, file_suffix)
     if not os.path.exists(run_folder):
         os.makedirs(run_folder)
-        
+
     stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks/")
     if not os.path.exists(stacks_cache_folder):
         os.makedirs(stacks_cache_folder)
-    
-    print('######### CMB LENSING PROFILES USING WEN HAN ET AL. 2024 VOIDS CATALOGUE #########')
-    print(f'Configuration: Release={release} | Mode={exec_mode} | Binning={binning_mode}')
+
+    print('######### CMB LENSING PROFILES USING WEN HAN ET AL. 2024 VOIDS CATALOGUE [PARALLEL] #########')
+    print(f'Configuration: Release={release} | Mode={exec_mode} | Binning={binning_mode} | n_workers={n_workers or os.cpu_count()}')
     print(f'Output Run Folder: {run_folder}')
     print('')
 
@@ -74,9 +79,9 @@ def run_pipeline(config):
     nside = 2048
     klm_file = f'{data_folder}CMB/Lensing/KAPPA_{release}klm_MV.fits'
     common_mask_file = f'{data_folder}CMB/Lensing/Common_mask_PR4Lensing_2048.fits'
-    
+
     cmb_alm = hp.fitsfunc.read_alm(klm_file, hdu=1, return_mmax=False)
-    common_mask = hp.read_map(common_mask_file)      
+    common_mask = hp.read_map(common_mask_file)
 
     filter_mode = config.get('filter_mode', 'none')
     if filter_mode == 'wiener':
@@ -112,7 +117,7 @@ def run_pipeline(config):
         for seed in range(n_seeds):
             file_path = f'{data_folder}/CATALOGOS/WenHan_voids_z0.6/voids_z0.6_{(seed+1):03d}.dat'
             voids_data[seed] = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
-            
+
             base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] > 1.9)
             filtered_data = voids_data[seed][base_filter].copy()
             final_data[seed] = apply_delta_23_filter(filtered_data, delta_23_value)
@@ -121,7 +126,7 @@ def run_pipeline(config):
         col_names = ['R_void', 'l', 'b', 'z']
         voids_data_raw = pd.read_csv(f'{data_folder}/CATALOGOS/WenHan_voids.dat', sep='\s+', names=col_names, header=None)
         final_data = voids_data_raw[
-            (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) & 
+            (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) &
             (voids_data_raw['R_void'] >= rmin) & (voids_data_raw['R_void'] <= rmax)
         ].copy()
         print(f'Total voids: {len(final_data)}')
@@ -129,12 +134,12 @@ def run_pipeline(config):
 
     #%% BINNING DATA
     print(f'\nBinning data...')
-    
+
     if binning_mode == 'redshift': metric_col = 'z'
     elif binning_mode == 'radius': metric_col = 'R_void'
-    
+
     bins_info_list = []
-    
+
     if n_seeds is None:
         final_data['bin_id'] = pd.qcut(final_data[metric_col], n_bins_quantile, labels=False)
         for i in sorted(final_data['bin_id'].unique()):
@@ -176,8 +181,8 @@ def run_pipeline(config):
     print('')
 
     #%% LOOP PRINCIPAL
-    print(f"\n######### Doing profiles in mode: {exec_mode} #########\n")
-    
+    print(f"\n######### Doing profiles in mode: {exec_mode} [PARALLEL] #########\n")
+
     bin_results_list = []
 
     if n_seeds is None:
@@ -186,31 +191,32 @@ def run_pipeline(config):
             gal_coords = info['coords']
             coords_bin = (gal_coords.l.degree, gal_coords.b.degree)
             z_bin_min, z_bin_max = info['z_range']
-        
-            result = fm.process_bin_stacking(
+
+            result = pm.process_bin_stacking_parallel(
                 release=release,
                 mode=exec_mode,
-                z_min=z_bin_min, 
+                z_min=z_bin_min,
                 z_max=z_bin_max,
-                r_min= rmin,
-                r_max=rmax, 
-                data_sample_bin=data_bin, 
+                r_min=rmin,
+                r_max=rmax,
+                data_sample_bin=data_bin,
                 coords_bin=coords_bin,
-                max_Rvoid=max_Rvoid, 
-                npix_stamp=npix_stamp, 
-                nside=nside, 
+                max_Rvoid=max_Rvoid,
+                npix_stamp=npix_stamp,
+                nside=nside,
                 bins_frac=bins_frac,
-                lensing_map=lensing_map, 
-                common_mask=common_mask, 
-                stacks_cache_folder=stacks_cache_folder, 
+                lensing_map=lensing_map,
+                common_mask=common_mask,
+                stacks_cache_folder=stacks_cache_folder,
                 n_random_factor=random_factor,
-                n_rotations=n_rotations, 
+                n_rotations=n_rotations,
                 n_subsamples=n_subsamples,
                 delta_label=delta_label,
                 filter_label=filter_label,
                 force_rerun=config.get('force_rerun', False),
                 random_pool=random_pool,
-                random_excl_factor=random_excl_factor
+                random_excl_factor=random_excl_factor,
+                n_workers=n_workers
             )
 
             result.update({
@@ -223,36 +229,36 @@ def run_pipeline(config):
         for info in bins_info_list:
             bin_id = info['id']
             print(f"--- Processing Bin {bin_id+1} for all {n_seeds} seeds ---")
-            
+
             seed_results = []
             for seed in range(n_seeds):
                 seed_info = info['data'][seed]
                 data_bin = seed_info['data']
                 gal_coords = seed_info['coords']
-                
+
                 if gal_coords is None or len(data_bin) == 0:
                     continue
-                    
+
                 coords_bin = (gal_coords.l.degree, gal_coords.b.degree)
                 z_bin_min, z_bin_max = seed_info['z_range']
-                
+
                 seed_cache_folder = os.path.join(stacks_cache_folder, f"seed_{seed}")
                 if not os.path.exists(seed_cache_folder):
                     os.makedirs(seed_cache_folder)
-                
-                result = fm.process_bin_stacking(
-                    release=release, mode=exec_mode, 
-                    z_min=z_bin_min, z_max=z_bin_max, r_min=rmin, r_max=rmax, 
-                    data_sample_bin=data_bin, coords_bin=coords_bin, max_Rvoid=max_Rvoid, 
-                    npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac, 
-                    lensing_map=lensing_map, common_mask=common_mask, 
+
+                result = pm.process_bin_stacking_parallel(
+                    release=release, mode=exec_mode,
+                    z_min=z_bin_min, z_max=z_bin_max, r_min=rmin, r_max=rmax,
+                    data_sample_bin=data_bin, coords_bin=coords_bin, max_Rvoid=max_Rvoid,
+                    npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac,
+                    lensing_map=lensing_map, common_mask=common_mask,
                     stacks_cache_folder=seed_cache_folder, n_random_factor=random_factor,
                     n_rotations=n_rotations, n_subsamples=n_subsamples, delta_label=delta_label, filter_label=filter_label, force_rerun=config.get('force_rerun', False),
-                    random_pool=random_pool, random_excl_factor=random_excl_factor
+                    random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers
                 )
                 result['seed'] = seed
                 seed_results.append(result)
-            
+
             if len(seed_results) > 0:
                 z_min_combined = np.min([sd['z_range'][0] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
                 z_max_combined = np.max([sd['z_range'][1] for s in info['data'].values() for sd in [s] if len(sd['data']) > 0])
@@ -267,25 +273,25 @@ def run_pipeline(config):
                 if not os.path.exists(combined_cache_folder):
                     os.makedirs(combined_cache_folder)
 
-                result_combined = fm.process_bin_stacking(release=release, mode=exec_mode,
-                                                          z_min=z_min_combined, z_max=z_max_combined, r_min= rmin, r_max=rmax,
-                                                          data_sample_bin=all_data_bin, 
-                                                          coords_bin=coords_combined, max_Rvoid=max_Rvoid, 
-                                                          npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac, 
+                result_combined = pm.process_bin_stacking_parallel(release=release, mode=exec_mode,
+                                                          z_min=z_min_combined, z_max=z_max_combined, r_min=rmin, r_max=rmax,
+                                                          data_sample_bin=all_data_bin,
+                                                          coords_bin=coords_combined, max_Rvoid=max_Rvoid,
+                                                          npix_stamp=npix_stamp, nside=nside, bins_frac=bins_frac,
                                                           lensing_map=lensing_map, common_mask=common_mask,
                                                           stacks_cache_folder=combined_cache_folder,
                                                           n_random_factor=random_factor, n_rotations=n_rotations, n_subsamples=n_subsamples,
                                                           delta_label=delta_label, filter_label=filter_label,
                                                           force_rerun=config.get('force_rerun', False),
-                                                          random_pool=random_pool, random_excl_factor=random_excl_factor)
-                
+                                                          random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers)
+
                 result_combined.update({
                     'bin_id': bin_id,
                     'binning_mode': binning_mode,
                     'is_multi_seed': True,
                     'seed_results': seed_results
                     })
-                bin_results_list.append(result_combined)         
+                bin_results_list.append(result_combined)
 
     # SAVING
     print('Saving results...')
@@ -301,9 +307,9 @@ def run_pipeline(config):
         fm.plot_seed_consistency(bin_results_list, seeds_plot_path, max_Rvoid)
 
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
-    with open(data_save_path, 'wb') as f: 
+    with open(data_save_path, 'wb') as f:
         pickle.dump({'bins_data': bin_results_list, 'parameters': config}, f)
         print(f"Data saved in: {data_save_path}")
 
 if __name__ == "__main__":
-    print("Please run from PIPELINE_SCRIPT.py")
+    print("Please run from Pipeline_voids.py")

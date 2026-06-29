@@ -6,8 +6,9 @@ Driver del análisis tSZ de cúmulos en paredes de void:
   1. Fusiona las N semillas en un catálogo único de voids        (void_seed_merge)
   2. Asocia cúmulos en cáscara 2.5D [f_min,f_max]*Rv + PA al void (cluster_void_assoc)
      con corte de inclinación LOS ("fases de luna": sólo separación transversal)
-  3-4. Por submuestra (escaneo de riqueza o split por delta_23): perfil orientado
-       D/C + suite de nulls con p-value empírico por Monte Carlo (oriented_stacking)
+  3-4. Por submuestra (escaneo de riqueza o split por delta_23): perfiles orientados
+       en OCTANTES -> diff_void (mirar al void) + diff_fil (elongación del filamento)
+       + suite de nulls (barajado/aleatorio/mapa rotado) con p-value MC (oriented_stacking)
 
 Muestras (build_samples): si 'richness_scan' está seteado, escanea lambda500;
 si no, si 'delta23_split' no es None, separa open/closed; si no, 'all'.
@@ -41,30 +42,38 @@ def build_samples(selected, config):
 
 def _save_suite(out, name, suite):
     d = {}
+    sector_keys = ('r', 'full', 'C', 'D', 'along', 'perp', 'up', 'down',
+                   'diff_void', 'diff_fil', 'diff_parity')
     for blk in ('signal', 'parity'):
         s = suite[blk]
-        for k in ('r', 'full', 'left', 'right', 'diff',
-                  'err_full', 'err_left', 'err_right', 'err_diff'):
+        for k in sector_keys:
             d[f'{blk}_{k}'] = s[k]
-        d[f'{blk}_cov_diff'] = s['cov_diff']
-    for blk in ('null_shuffled', 'null_random'):
-        s = suite[blk]
-        d[f'{blk}_diff_mean'] = s['diff_mean']
-        d[f'{blk}_diff_std'] = s['diff_std']
-        d[f'{blk}_T_null'] = s['T_null']
-        d[f'{blk}_T_signal'] = np.array(s['T_signal'])
-        d[f'{blk}_p_value'] = np.array(s['p_value'])
+            d[f'{blk}_err_{k}'] = s[f'err_{k}']
+        d[f'{blk}_cov_void'] = s['cov_void']
+        d[f'{blk}_cov_fil'] = s['cov_fil']
+    for mode, blk in suite['nulls'].items():
+        for which in ('void', 'fil'):
+            s = blk[which]
+            tag = f'null_{mode}_{which}'
+            d[f'{tag}_diff_mean'] = s['diff_mean']
+            d[f'{tag}_diff_std'] = s['diff_std']
+            d[f'{tag}_T_null'] = s['T_null']
+            d[f'{tag}_T_signal'] = np.array(s['T_signal'])
+            d[f'{tag}_p_value'] = np.array(s['p_value'])
     np.savez(os.path.join(out, f"tSZ_oriented_{name}.npz"), **d)
 
 
 def _print_summary(name, suite):
-    sig = suite['signal']
-    sh, rn, par = suite['null_shuffled'], suite['null_random'], suite['parity']
+    sig, par = suite['signal'], suite['parity']
     print(f"[summary:{name}] N={suite['n']}  pico full={np.nanmax(sig['full']):.2e}")
-    print(f"           diff: T={sh['T_signal']:.1f}  "
-          f"p(barajado)={sh['p_value']:.3f}  p(aleatorio)={rn['p_value']:.3f}")
-    print(f"           paridad: max|diff|/err = "
-          f"{np.nanmax(np.abs(par['diff']) / par['err_diff']):.1f}  (debe ~<2-3)")
+    for which, lab in (('void', 'mirar void'), ('fil', 'filamento')):
+        ps = "  ".join(f"p({mode})={blk[which]['p_value']:.3f}"
+                       for mode, blk in suite['nulls'].items())
+        T = next(iter(suite['nulls'].values()))[which]['T_signal']
+        print(f"           {lab:9s}: T={T:.1f}  {ps}")
+    for which in ('void', 'fil'):
+        ratio = np.nanmax(np.abs(par[f'diff_{which}']) / par[f'err_diff_{which}'])
+        print(f"           paridad {which}: max|diff|/err = {ratio:.1f}  (debe ~<2-3)")
 
 
 def run(config):

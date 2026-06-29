@@ -2,9 +2,9 @@
 oriented_stacking.py
 ====================
 Stacking gnomónico ORIENTADO según la dirección al void, perfiles radiales
-partidos en mitades (cara al void "C" vs cara opuesta "D") y errores jackknife
-sobre L, R y la diferencia L-R. Incluye calibración de la convención de
-orientación y null de orientación aleatoria.
+partidos en OCTANTES (un único binneado de 45 deg) y errores jackknife sobre
+cada grupo y sobre las diferencias. Incluye calibración de la convención de
+orientación y suite de nulls (PA barajado/aleatorio + mapa rotado).
 
 Escala
 ------
@@ -12,12 +12,13 @@ Comóvil Mpc/h, consistente con R_void. `size_mpch` = ancho TOTAL del stamp en
 Mpc/h. (El ángulo proyectado es el mismo que con Mpc propios; lo que cambia es la
 etiqueta del eje, y la elegimos comóvil Mpc/h para comparar con R_void.)
 
-Convención de mitades
----------------------
-Tras calibrar, el void queda a la IZQUIERDA del stamp. Entonces:
-  - mitad IZQUIERDA  -> 'left'  -> CARA AL VOID   (media luna "C")
-  - mitad DERECHA    -> 'right' -> CARA OPUESTA   (media luna "D")
-La diferencia se define diff = left - right = (cara al void) - (opuesta).
+Convención de octantes
+----------------------
+Tras calibrar, el void queda a la IZQUIERDA del stamp. Con los 8 octantes:
+  - diff_void = (cara al void: NW+W+SW) - (opuesta: NE+E+SE)   [mirar al void]
+  - diff_fil  = (a lo largo del filamento: N+S) - (perp/eje void: W+E)
+  - diff_parity = (arriba: NE+N+NW) - (abajo: SW+S+SE)   [debe ~0; sistemáticos]
+Ver cabecera de radial_profile_regions para los bordes exactos (22.5+45k deg).
 
 ADVERTENCIA
 -----------
@@ -78,24 +79,62 @@ def stack_oriented(lon, lat, z, pa_deg, cmb_map, mask, size_mpch, npix,
 
 
 # ----------------------------------------------------------------------
-# perfiles radiales: completo + mitades
+# perfiles radiales por OCTANTES (un único binneado de 45 deg)
 # ----------------------------------------------------------------------
-def _geom(npix, size_mpch):
+# Convención (void calibrado a la IZQUIERDA del stamp):
+#   phi = atan2(yy, xx) en deg, 0..360. Derecha(+x)=0, arriba(+y)=90,
+#   izquierda(-x, void)=180, abajo(-y)=270.
+#
+#   Octantes (centro, ancho 45): E=0, NE=45, N=90, NW=135, W=180(void),
+#   SW=225, S=270, SE=315. Bordes en 22.5 + 45*k.
+#
+# Grupos derivados de los 8 octantes:
+#   C  (cara al void)  = NW+W+SW   (izquierda, phi in [112.5,247.5))
+#   D  (opuesta)       = NE+E+SE   (derecha,   phi in [-67.5, 67.5))
+#   along (filamento)  = N+S       (vertical,  tangencial a la pared)
+#   perp  (eje al void)= W+E       (horizontal, perpendicular al filamento)
+#   up / down          = chequeo de simetría arriba/abajo (null ~0)
+#
+# Medidas:
+#   diff_void   = C - D       (mirar al void vs opuesta)
+#   diff_fil    = along - perp (a lo largo del filamento vs perpendicular)
+#   diff_parity = up - down    (debe ~0; sistemáticos de orientación)
+# ----------------------------------------------------------------------
+def _octant_geom(npix, size_mpch):
     c = npix // 2
     yy, xx = np.ogrid[-c:npix - c, -c:npix - c]
-    r = np.sqrt(xx * xx + yy * yy) * (size_mpch / npix)   # Mpc/h comóvil
-    left = (xx < 0)            # columna central (xx==0) excluida de ambas
-    right = (xx > 0)
-    return r, left, right
+    r = np.sqrt(xx * xx + yy * yy) * (size_mpch / npix)     # Mpc/h comóvil
+    phi = np.degrees(np.arctan2(yy * np.ones_like(xx),
+                                xx * np.ones_like(yy))) % 360.0
+    return r, phi
 
 
-def radial_profile_halves(SUM, COUNT, size_mpch, bins):
+def _region_masks(phi):
+    """Máscaras booleanas de los grupos de octantes (ver cabecera)."""
+    C = (phi >= 112.5) & (phi < 247.5)                       # NW+W+SW (cara)
+    D = (phi < 67.5) | (phi >= 292.5)                        # NE+E+SE (opuesta)
+    along = (((phi >= 67.5) & (phi < 112.5)) |               # N
+             ((phi >= 247.5) & (phi < 292.5)))               # S
+    perp = ((phi < 22.5) | (phi >= 337.5) |                  # E
+            ((phi >= 157.5) & (phi < 202.5)))                # W
+    up = (phi >= 22.5) & (phi < 157.5)                       # NE+N+NW
+    down = (phi >= 202.5) & (phi < 337.5)                    # SW+S+SE
+    return {'C': C, 'D': D, 'along': along, 'perp': perp, 'up': up, 'down': down}
+
+
+# claves de perfil que produce radial_profile_regions (orden estable)
+REGION_KEYS = ('full', 'C', 'D', 'along', 'perp', 'up', 'down',
+               'diff_void', 'diff_fil', 'diff_parity')
+
+
+def radial_profile_regions(SUM, COUNT, size_mpch, bins):
     """
-    Perfil pesado por COUNT en cada anillo, separando mitades.
-    Returns: r_centers, full, left, right, diff(=left-right)
+    Perfil pesado por COUNT en cada anillo, para cada grupo de octantes.
+    Returns: dict con 'r' + las claves de REGION_KEYS (cada una array nbins).
     """
     npix = SUM.shape[0]
-    r, left, right = _geom(npix, size_mpch)
+    r, phi = _octant_geom(npix, size_mpch)
+    regions = _region_masks(phi)
 
     def _prof(extra_mask):
         out = []
@@ -105,19 +144,21 @@ def radial_profile_halves(SUM, COUNT, size_mpch, bins):
             out.append(np.nansum(SUM[ring]) / den if den > 0 else np.nan)
         return np.array(out)
 
-    full = _prof(np.ones_like(left, dtype=bool))
-    L = _prof(left)
-    R = _prof(right)
-    rc = 0.5 * (bins[:-1] + bins[1:])
-    return rc, full, L, R, (L - R)
+    P = {name: _prof(m) for name, m in regions.items()}
+    P['full'] = _prof(np.ones_like(r, dtype=bool))
+    P['diff_void'] = P['C'] - P['D']
+    P['diff_fil'] = P['along'] - P['perp']
+    P['diff_parity'] = P['up'] - P['down']
+    P['r'] = 0.5 * (bins[:-1] + bins[1:])
+    return P
 
 
 # ----------------------------------------------------------------------
-# errores jackknife (KMeans en la esfera) para L, R, full y diff
+# errores jackknife (KMeans en la esfera) para todos los grupos + diffs
 # ----------------------------------------------------------------------
-def halves_with_errors(lon, lat, z, pa_deg, cmb_map, mask, size_mpch, npix, bins,
-                       n_subsamples=20, pa_offset=0.0, pa_sign=1.0,
-                       randomize_pa=False, rng=None):
+def sectors_with_errors(lon, lat, z, pa_deg, cmb_map, mask, size_mpch, npix, bins,
+                        n_subsamples=20, pa_offset=0.0, pa_sign=1.0,
+                        randomize_pa=False, rng=None):
     lon = np.asarray(lon); lat = np.asarray(lat)
     z = np.asarray(z); pa_deg = np.asarray(pa_deg)
     n = len(lon)
@@ -143,31 +184,29 @@ def halves_with_errors(lon, lat, z, pa_deg, cmb_map, mask, size_mpch, npix, bins
     sums, counts = np.array(sums), np.array(counts)
     SUM, COUNT = sums.sum(0), counts.sum(0)
 
-    rc, full, L, R, D = radial_profile_halves(SUM, COUNT, size_mpch, bins)
+    P = radial_profile_regions(SUM, COUNT, size_mpch, bins)
 
-    jkF, jkL, jkR, jkD = [], [], [], []
+    jk = {key: [] for key in REGION_KEYS}
     for k in range(n_subsamples):
-        _, f, l, r, d = radial_profile_halves(SUM - sums[k], COUNT - counts[k],
-                                              size_mpch, bins)
-        jkF.append(f); jkL.append(l); jkR.append(r); jkD.append(d)
+        Pk = radial_profile_regions(SUM - sums[k], COUNT - counts[k],
+                                    size_mpch, bins)
+        for key in REGION_KEYS:
+            jk[key].append(Pk[key])
 
-    def _cov(jk, best):
-        jk = np.array(jk)
-        delta = np.nan_to_num(jk - best)
+    def _cov(jklist, best):
+        a = np.array(jklist)
+        delta = np.nan_to_num(a - best)
         return (n_subsamples - 1) / n_subsamples * (delta.T @ delta)
 
-    covF, covL, covR, covD = (_cov(jkF, full), _cov(jkL, L),
-                              _cov(jkR, R), _cov(jkD, D))
-    return {
-        'r': rc, 'full': full, 'left': L, 'right': R, 'diff': D,
-        'err_full': np.sqrt(np.diag(covF)),
-        'err_left': np.sqrt(np.diag(covL)),
-        'err_right': np.sqrt(np.diag(covR)),
-        'err_diff': np.sqrt(np.diag(covD)),
-        'cov_diff': covD, 'n': n, 'map': np.divide(SUM, COUNT,
-                                                   out=np.full_like(SUM, np.nan),
-                                                   where=COUNT > 0),
-    }
+    res = {'r': P['r'], 'n': n,
+           'map': np.divide(SUM, COUNT, out=np.full_like(SUM, np.nan),
+                            where=COUNT > 0)}
+    for key in REGION_KEYS:
+        res[key] = P[key]
+        res['err_' + key] = np.sqrt(np.diag(_cov(jk[key], P[key])))
+    res['cov_void'] = _cov(jk['diff_void'], P['diff_void'])
+    res['cov_fil'] = _cov(jk['diff_fil'], P['diff_fil'])
+    return res
 
 
 # ----------------------------------------------------------------------
@@ -265,72 +304,54 @@ def calibrate_orientation(nside=512, npix=200, z_test=0.3, box_deg=6.0,
 
 
 # ----------------------------------------------------------------------
-# plotting
-# ----------------------------------------------------------------------
-def plot_halves(res, outpath, null_res=None, size_mpch=None, label=""):
-    """
-    res, null_res : dicts de halves_with_errors (null con randomize_pa=True).
-    Panel 1: mapa orientado. Panel 2: left/right/full. Panel 3: diff +- err, con
-    banda del null si se provee.
-    """
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 3, figsize=(16, 4.5))
-
-    if size_mpch is not None and res.get('map') is not None:
-        ext = [-size_mpch / 2, size_mpch / 2, -size_mpch / 2, size_mpch / 2]
-        im = ax[0].imshow(res['map'], origin='lower', cmap='viridis', extent=ext)
-        ax[0].axvline(0, color='w', ls='--', lw=0.8)
-        ax[0].set_title(f"Stack orientado (void a la izq.)\n{label}")
-        ax[0].set_xlabel("Mpc/h"); ax[0].set_ylabel("Mpc/h")
-        plt.colorbar(im, ax=ax[0], fraction=0.046)
-
-    r = res['r']
-    ax[1].errorbar(r, res['left'], yerr=res['err_left'], fmt='o-',
-                   color='xkcd:teal', capsize=2, label='izq = cara al void (C)')
-    ax[1].errorbar(r, res['right'], yerr=res['err_right'], fmt='s-',
-                   color='xkcd:orange', capsize=2, label='der = opuesta (D)')
-    ax[1].plot(r, res['full'], 'k:', alpha=0.6, label='isótropo')
-    ax[1].axhline(0, color='k', ls=':', alpha=0.5)
-    ax[1].set_xlabel("r [Mpc/h]"); ax[1].set_ylabel("señal")
-    ax[1].legend(fontsize=8); ax[1].grid(alpha=0.25)
-
-    ax[2].errorbar(r, res['diff'], yerr=res['err_diff'], fmt='o-',
-                   color='xkcd:crimson', capsize=2, label='L - R (dato)')
-    if null_res is not None:
-        ax[2].fill_between(r, null_res['diff'] - null_res['err_diff'],
-                           null_res['diff'] + null_res['err_diff'],
-                           color='gray', alpha=0.35, label='null (PA aleatorio)')
-    ax[2].axhline(0, color='k', ls=':', alpha=0.6)
-    ax[2].set_xlabel("r [Mpc/h]"); ax[2].set_ylabel("(cara al void) - (opuesta)")
-    ax[2].legend(fontsize=8); ax[2].grid(alpha=0.25)
-
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=200, bbox_inches='tight')
-    print(f"[plot] guardado en {outpath}")
-    plt.close()
-
-
-# ----------------------------------------------------------------------
 # suite completo (señal + nulls) para una muestra
 # ----------------------------------------------------------------------
-def null_pvalue(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
-                cov_signal, diff_signal, pa_sign, pa_offset,
-                n_real=100, mode='shuffled', rng=None):
-    """
-    Distribución MC del estadístico T = d^T C^-1 d bajo la hipótesis nula,
-    repitiendo n_real realizaciones (UN stack cada una, sin JK). C = covarianza
-    JK de la señal. p-value empírico = (#{T_null >= T_señal} + 1)/(n_real + 1).
+# Modos de null (rompen el vínculo físico cúmulo->void de distinta forma):
+#   'shuffled' : permuta PA entre cúmulos -> conserva la distribución real de PA.
+#   'random'   : PA uniforme -> piso de ruido del estimador.
+#   'rotated'  : rotación rígida del catálogo sobre el mapa real (mantiene la
+#                geometría interna y el PA, pero lo manda a un parche no
+#                correlacionado) -> piso de SISTEMÁTICOS del mapa/máscara.
+NULL_MODES = ('shuffled', 'random', 'rotated')
 
-      mode='shuffled' : permuta PA entre cúmulos -> rompe el vínculo físico pero
-                        conserva la distribución real de PA (null fuerte).
-      mode='random'   : PA uniforme -> piso de ruido del estimador.
 
-    Esto reemplaza al p~chi2 gaussiano (que asume la cov JK perfecta) por un
-    p-value calibrado por simulación, y de paso da una banda (media +- std de la
-    'diff' sobre realizaciones) mejor que la de un solo draw.
+def _null_realizations(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
+                       pa_sign, pa_offset, n_real, mode, rng):
     """
-    if rng is None:
-        rng = np.random.default_rng(0)
+    n_real realizaciones del null `mode` (UN stack cada una, sin JK).
+    Returns: (diffs_void, diffs_fil), cada uno array (n_real, nbins).
+    """
+    nb = len(bins) - 1
+    dv = np.empty((n_real, nb))
+    df = np.empty((n_real, nb))
+    lon = np.asarray(lon); lat = np.asarray(lat)
+    for i in range(n_real):
+        if mode == 'shuffled':
+            S, C = stack_oriented(lon, lat, z, rng.permutation(pa), cmb_map, mask,
+                                  size_mpch, npix, pa_sign=pa_sign, pa_offset=pa_offset)
+        elif mode == 'random':
+            S, C = stack_oriented(lon, lat, z, pa, cmb_map, mask, size_mpch, npix,
+                                  randomize_pa=True, rng=rng)
+        elif mode == 'rotated':
+            rot = hp.Rotator(rot=(rng.uniform(0, 360), rng.uniform(-90, 90),
+                                  rng.uniform(0, 360)), deg=True)
+            rlon, rlat = rot(lon, lat, lonlat=True)
+            S, C = stack_oriented(rlon, rlat, z, pa, cmb_map, mask, size_mpch, npix,
+                                  pa_sign=pa_sign, pa_offset=pa_offset)
+        else:
+            raise ValueError(f"modo de null desconocido: {mode}")
+        P = radial_profile_regions(S, C, size_mpch, bins)
+        dv[i] = P['diff_void']
+        df[i] = P['diff_fil']
+    return dv, df
+
+
+def _pvalue_from_null(diffs, cov_signal, diff_signal):
+    """
+    p-value empírico del estadístico T = d^T C^-1 d con la distribución `diffs`
+    del null (cada fila una realización). C = covarianza JK de la señal.
+    p = (#{T_null >= T_señal} + 1)/(n_real + 1).
+    """
     good = np.isfinite(diff_signal) & np.isfinite(np.diag(cov_signal))
     Cinv = np.linalg.pinv(cov_signal[np.ix_(good, good)])
 
@@ -339,34 +360,27 @@ def null_pvalue(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
         return float(dd @ Cinv @ dd)
 
     T_sig = _T(diff_signal)
-    T_null = np.empty(n_real)
-    diffs = np.empty((n_real, len(bins) - 1))
-    for i in range(n_real):
-        if mode == 'shuffled':
-            S, C = stack_oriented(lon, lat, z, rng.permutation(pa), cmb_map, mask,
-                                  size_mpch, npix, pa_sign=pa_sign, pa_offset=pa_offset)
-        else:
-            S, C = stack_oriented(lon, lat, z, pa, cmb_map, mask, size_mpch, npix,
-                                  randomize_pa=True, rng=rng)
-        _, _, _, _, d = radial_profile_halves(S, C, size_mpch, bins)
-        diffs[i] = d
-        T_null[i] = _T(d)
+    T_null = np.array([_T(d) for d in diffs])
+    n_real = len(diffs)
     p = (np.sum(T_null >= T_sig) + 1) / (n_real + 1)
-    print(f"[null:{mode:8s}] n_real={n_real}  T_signal={T_sig:.1f}  p-value={p:.3f}")
-    return {'mode': mode, 'n_real': n_real, 'T_signal': T_sig, 'T_null': T_null,
-            'p_value': p, 'diff_mean': np.nanmean(diffs, 0),
-            'diff_std': np.nanstd(diffs, 0)}
+    return {'n_real': n_real, 'T_signal': T_sig, 'T_null': T_null, 'p_value': p,
+            'diff_mean': np.nanmean(diffs, 0), 'diff_std': np.nanstd(diffs, 0)}
 
 
 def run_suite(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
-              pa_sign, pa_offset, n_subsamples=25, n_null_real=100, rng=None, label=""):
+              pa_sign, pa_offset, n_subsamples=25, n_null_real=100, rng=None,
+              label="", null_modes=NULL_MODES):
     """
-    Para UNA muestra:
-      signal : orientado al void (halves_with_errors + covarianza JK).
-      parity : SIN orientar (pa_sign=0) -> null instrumental de L-R (1 realización
-               JK; es determinista, no Monte Carlo).
-      null_shuffled / null_random : distribución MC de T con n_null_real
-               realizaciones -> p-value empírico + banda (media +- std).
+    Para UNA muestra (binneado de octantes):
+      signal : orientado al void (sectors_with_errors + covarianza JK de cada diff).
+      parity : SIN orientar (pa_sign=0) -> null instrumental (determinista).
+      nulls  : por cada modo de NULL_MODES, distribución MC de T (n_null_real
+               realizaciones) -> p-value empírico + banda, TANTO para diff_void
+               como para diff_fil.
+
+    Estructura de salida:
+      out['signal'], out['parity'] : dicts de sectors_with_errors.
+      out['nulls'][mode]['void'|'fil'] : dict de _pvalue_from_null.
     """
     if rng is None:
         rng = np.random.default_rng(0)
@@ -376,63 +390,129 @@ def run_suite(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
 
     common = dict(cmb_map=cmb_map, mask=mask, size_mpch=size_mpch, npix=npix, bins=bins)
     out = {'label': label, 'n': len(lon)}
-    out['signal'] = halves_with_errors(lon, lat, z, pa, pa_sign=pa_sign,
-                                       pa_offset=pa_offset, n_subsamples=n_subsamples,
-                                       **common)
-    out['parity'] = halves_with_errors(lon, lat, z, pa, pa_sign=0.0, pa_offset=0.0,
-                                       n_subsamples=n_subsamples, **common)
-    cov, dsig = out['signal']['cov_diff'], out['signal']['diff']
-    out['null_shuffled'] = null_pvalue(lon, lat, z, pa, cov_signal=cov, diff_signal=dsig,
-                                       pa_sign=pa_sign, pa_offset=pa_offset,
-                                       n_real=n_null_real, mode='shuffled', rng=rng, **common)
-    out['null_random'] = null_pvalue(lon, lat, z, pa, cov_signal=cov, diff_signal=dsig,
-                                     pa_sign=pa_sign, pa_offset=pa_offset,
-                                     n_real=n_null_real, mode='random', rng=rng, **common)
+    out['signal'] = sectors_with_errors(lon, lat, z, pa, pa_sign=pa_sign,
+                                        pa_offset=pa_offset, n_subsamples=n_subsamples,
+                                        **common)
+    out['parity'] = sectors_with_errors(lon, lat, z, pa, pa_sign=0.0, pa_offset=0.0,
+                                        n_subsamples=n_subsamples, **common)
+
+    cov_v, d_v = out['signal']['cov_void'], out['signal']['diff_void']
+    cov_f, d_f = out['signal']['cov_fil'], out['signal']['diff_fil']
+    out['nulls'] = {}
+    for mode in null_modes:
+        dv, df = _null_realizations(lon, lat, z, pa, pa_sign=pa_sign,
+                                    pa_offset=pa_offset, n_real=n_null_real,
+                                    mode=mode, rng=rng, **common)
+        nv = _pvalue_from_null(dv, cov_v, d_v)
+        nf = _pvalue_from_null(df, cov_f, d_f)
+        out['nulls'][mode] = {'void': nv, 'fil': nf}
+        print(f"[null:{mode:8s}] n_real={n_null_real}  "
+              f"void: T={nv['T_signal']:.1f} p={nv['p_value']:.3f}  | "
+              f"fil: T={nf['T_signal']:.1f} p={nf['p_value']:.3f}")
     return out
 
 
-def plot_suite(suite, outpath, size_mpch, label=""):
+# ----------------------------------------------------------------------
+# plotting
+# ----------------------------------------------------------------------
+_NULL_COLORS = {'shuffled': 'xkcd:purple', 'random': 'xkcd:slate blue',
+                'rotated': 'xkcd:green'}
+_NULL_LABEL = {'shuffled': 'barajado', 'random': 'aleatorio', 'rotated': 'mapa rotado'}
+
+
+def _draw_octants(ax, half):
+    """Bordes de octantes (22.5+45k deg) sobre el panel del mapa orientado."""
+    for ang in np.arange(22.5, 360, 45.0):
+        a = np.radians(ang)
+        ax.plot([0, half * np.cos(a)], [0, half * np.sin(a)],
+                color='w', ls=':', lw=0.6, alpha=0.6)
+
+
+def _plot_diff_panel(ax, r, diff, err, parity, nulls, which, ylabel):
+    """Panel de una diff (void o fil) con banda de paridad + nulls + p-values."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
+    ax.axhline(0, color='k', ls=':', alpha=0.6)
+    ax.fill_between(r, parity[f'diff_{which}'] - parity[f'err_diff_{which}'],
+                    parity[f'diff_{which}'] + parity[f'err_diff_{which}'],
+                    color='xkcd:grey', alpha=0.22)
+    handles = [plt.Line2D([], [], color='xkcd:crimson', marker='o', label='dato'),
+               Patch(color='xkcd:grey', alpha=0.22, label='paridad (sin orientar)')]
+    for mode, nd in nulls.items():
+        n = nd[which]
+        col = _NULL_COLORS.get(mode, 'xkcd:grey')
+        ax.fill_between(r, n['diff_mean'] - n['diff_std'],
+                        n['diff_mean'] + n['diff_std'], color=col, alpha=0.20)
+        handles.append(Patch(color=col, alpha=0.20,
+                             label=f"null {_NULL_LABEL.get(mode, mode)} (p={n['p_value']:.3f})"))
+    ax.errorbar(r, diff, yerr=err, fmt='o-', color='xkcd:crimson',
+                capsize=3, lw=1.8, zorder=5)
+    ax.set_xlabel("r [Mpc/h]"); ax.set_ylabel(ylabel)
+    ax.legend(handles=handles, fontsize=7); ax.grid(alpha=0.25)
+
+
+def plot_suite(suite, outpath, size_mpch, label=""):
+    """
+    Figura 2x3:
+      (0,0) mapa orientado con bordes de octantes.
+      (0,1) perfiles cara (C) vs opuesta (D) + isótropo.
+      (0,2) diff_void = C - D, con paridad + nulls + p-values.
+      (1,0) chequeo de simetría arriba/abajo (diff_parity, debe ~0).
+      (1,1) perfiles a lo largo del filamento (N+S) vs perpendicular (W+E).
+      (1,2) diff_fil = along - perp, con paridad + nulls + p-values.
+    """
+    import matplotlib.pyplot as plt
     sig = suite['signal']
-    r = sig['r']
-    fig, ax = plt.subplots(1, 3, figsize=(16, 4.5))
-
-    ext = [-size_mpch / 2, size_mpch / 2, -size_mpch / 2, size_mpch / 2]
-    im = ax[0].imshow(sig['map'], origin='lower', cmap='viridis', extent=ext)
-    ax[0].axvline(0, color='w', ls='--', lw=0.8)
-    ax[0].set_title(f"Stack orientado (void=izq)\n{label}  N={suite['n']}")
-    ax[0].set_xlabel("Mpc/h"); ax[0].set_ylabel("Mpc/h")
-    plt.colorbar(im, ax=ax[0], fraction=0.046)
-
-    ax[1].errorbar(r, sig['left'], yerr=sig['err_left'], fmt='o-', color='xkcd:teal',
-                   capsize=2, label='izq = cara al void (C)')
-    ax[1].errorbar(r, sig['right'], yerr=sig['err_right'], fmt='s-', color='xkcd:orange',
-                   capsize=2, label='der = opuesta (D)')
-    ax[1].plot(r, sig['full'], 'k:', alpha=0.6, label='isótropo (sin restar mean-field)')
-    ax[1].axhline(0, color='k', ls=':', alpha=0.5)
-    ax[1].set_xlabel("r [Mpc/h]"); ax[1].set_ylabel("señal")
-    ax[1].legend(fontsize=8); ax[1].grid(alpha=0.25)
-
-    ax[2].axhline(0, color='k', ls=':', alpha=0.6)
     par = suite['parity']
-    ax[2].fill_between(r, par['diff'] - par['err_diff'], par['diff'] + par['err_diff'],
-                       color='xkcd:grey', alpha=0.22)
-    for key, col in [('null_random', 'xkcd:slate blue'), ('null_shuffled', 'xkcd:purple')]:
-        nd = suite[key]
-        ax[2].fill_between(r, nd['diff_mean'] - nd['diff_std'],
-                           nd['diff_mean'] + nd['diff_std'], color=col, alpha=0.22)
-    ax[2].errorbar(r, sig['diff'], yerr=sig['err_diff'], fmt='o-', color='xkcd:crimson',
-                   capsize=3, lw=1.8, zorder=5)
-    p_rn = suite['null_random']['p_value']
-    p_sh = suite['null_shuffled']['p_value']
-    handles = [plt.Line2D([], [], color='xkcd:crimson', marker='o', label='L-R (dato)'),
-               Patch(color='xkcd:grey', alpha=0.22, label='paridad'),
-               Patch(color='xkcd:slate blue', alpha=0.22, label=f'null aleat. (p={p_rn:.3f})'),
-               Patch(color='xkcd:purple', alpha=0.22, label=f'null barajado (p={p_sh:.3f})')]
-    ax[2].legend(handles=handles, fontsize=8)
-    ax[2].set_xlabel("r [Mpc/h]"); ax[2].set_ylabel("(cara al void) - (opuesta)")
-    ax[2].grid(alpha=0.25)
+    nulls = suite['nulls']
+    r = sig['r']
+    fig, ax = plt.subplots(2, 3, figsize=(16, 9))
+
+    # (0,0) mapa
+    ext = [-size_mpch / 2, size_mpch / 2, -size_mpch / 2, size_mpch / 2]
+    im = ax[0, 0].imshow(sig['map'], origin='lower', cmap='viridis', extent=ext)
+    _draw_octants(ax[0, 0], size_mpch / 2)
+    ax[0, 0].set_title(f"Stack orientado (void=izq)\n{label}  N={suite['n']}")
+    ax[0, 0].set_xlabel("Mpc/h"); ax[0, 0].set_ylabel("Mpc/h")
+    plt.colorbar(im, ax=ax[0, 0], fraction=0.046)
+
+    # (0,1) cara vs opuesta
+    ax[0, 1].errorbar(r, sig['C'], yerr=sig['err_C'], fmt='o-', color='xkcd:teal',
+                      capsize=2, label='cara al void (C=NW+W+SW)')
+    ax[0, 1].errorbar(r, sig['D'], yerr=sig['err_D'], fmt='s-', color='xkcd:orange',
+                      capsize=2, label='opuesta (D=NE+E+SE)')
+    ax[0, 1].plot(r, sig['full'], 'k:', alpha=0.6, label='isótropo')
+    ax[0, 1].axhline(0, color='k', ls=':', alpha=0.5)
+    ax[0, 1].set_xlabel("r [Mpc/h]"); ax[0, 1].set_ylabel("señal")
+    ax[0, 1].legend(fontsize=8); ax[0, 1].grid(alpha=0.25)
+
+    # (0,2) diff_void
+    _plot_diff_panel(ax[0, 2], r, sig['diff_void'], sig['err_diff_void'], par, nulls,
+                     'void', "(cara al void) - (opuesta)")
+    ax[0, 2].set_title("Mirar al void")
+
+    # (1,0) simetría arriba/abajo (null interno)
+    ax[1, 0].axhline(0, color='k', ls=':', alpha=0.6)
+    ax[1, 0].errorbar(r, sig['diff_parity'], yerr=sig['err_diff_parity'], fmt='o-',
+                      color='xkcd:dark grey', capsize=2)
+    ax[1, 0].set_title("Simetría arriba/abajo (debe ~0)")
+    ax[1, 0].set_xlabel("r [Mpc/h]"); ax[1, 0].set_ylabel("up - down")
+    ax[1, 0].grid(alpha=0.25)
+
+    # (1,1) along vs perp
+    ax[1, 1].errorbar(r, sig['along'], yerr=sig['err_along'], fmt='o-',
+                      color='xkcd:purple', capsize=2, label='a lo largo del filamento (N+S)')
+    ax[1, 1].errorbar(r, sig['perp'], yerr=sig['err_perp'], fmt='s-',
+                      color='xkcd:goldenrod', capsize=2, label='perpendicular / eje void (W+E)')
+    ax[1, 1].plot(r, sig['full'], 'k:', alpha=0.6, label='isótropo')
+    ax[1, 1].axhline(0, color='k', ls=':', alpha=0.5)
+    ax[1, 1].set_xlabel("r [Mpc/h]"); ax[1, 1].set_ylabel("señal")
+    ax[1, 1].legend(fontsize=8); ax[1, 1].grid(alpha=0.25)
+
+    # (1,2) diff_fil
+    _plot_diff_panel(ax[1, 2], r, sig['diff_fil'], sig['err_diff_fil'], par, nulls,
+                     'fil', "(a lo largo filamento) - (perp)")
+    ax[1, 2].set_title("Elongación del filamento")
 
     plt.tight_layout()
     plt.savefig(outpath, dpi=200, bbox_inches='tight')

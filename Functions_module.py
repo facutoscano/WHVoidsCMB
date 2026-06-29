@@ -236,20 +236,51 @@ def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, m
     return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles, cov_matrix
 
 
-def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='d23_all', filter_label='none', force_rerun=False):
+def build_random_exclusion_mask(base_mask, l, b, redshifts, r_voids, excl_factor, nside, silent=False):
+    """Return a copy of base_mask with angular disks of radius (excl_factor * Rv) around
+    every real void zeroed out, so random null positions cannot land on real voids.
+    excl_factor is in units of Rv; with excl_factor<=0 or None the mask is returned unchanged."""
+    if excl_factor is None or excl_factor <= 0:
+        return base_mask
+    excl = base_mask.copy()
+    if not silent:
+        print(f'Building random-exclusion mask around {len(l)} voids (excl_factor={excl_factor}*Rv)...')
+    for i in range(len(l)):
+        theta_deg = get_angularsize_comoving(redshifts[i], excl_factor * r_voids[i])
+        vec = hp.ang2vec(l[i], b[i], lonlat=True)
+        pix = hp.query_disc(nside, vec, np.radians(theta_deg))
+        excl[pix] = 0.0
+    if not silent:
+        f_in, f_out = base_mask.mean(), excl.mean()
+        print(f'  random pool: {f_out/f_in*100:.1f}% of the base footprint remains after exclusion.')
+    return excl
+
+
+def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='d23_all', filter_label='none', force_rerun=False, random_pool='full', random_excl_factor=1.0):
     z_text = f'{z_min:.2f}_{z_max:.2f}'
     r_text = f'{r_min:.1f}_{r_max:.1f}'
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
     
-    print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')  
-    survey_mask = footprint_mask(l, b, output_nside=nside)
-    effective_mask = common_mask * survey_mask
+    print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')
+
+    # --- Random null pool ---------------------------------------------------
+    # 'full'    -> randoms drawn over the whole CMB-lensing footprint (common_mask)
+    # 'survey'  -> randoms restricted to the void survey footprint (legacy behaviour)
+    # An exclusion mask removes disks of (random_excl_factor * Rv) around real voids
+    # so the random null does not pick up real void signal.
+    if random_pool == 'survey':
+        random_base_mask = common_mask * footprint_mask(l, b, output_nside=nside)
+    else:
+        random_base_mask = common_mask
+    random_position_mask = build_random_exclusion_mask(
+        random_base_mask, l, b, redshifts_all, r_voids_all, random_excl_factor, nside)
+    rand_label = f'rpool{random_pool}_excl{(random_excl_factor or 0):.1f}'
 
     n_rotations = n_rotations if n_rotations is not None else 0
     n_random_factor = n_random_factor if n_random_factor is not None else 0
 
-    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.pkl')
+    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}_{rand_label}.pkl')
 
     if not force_rerun and os.path.exists(signal_cache_file):
         with open(signal_cache_file, 'rb') as f:
@@ -267,7 +298,7 @@ def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_
     else:
         signal_data = None
 
-    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}.npz')
+    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}_{rand_label}.npz')
 
     existing_rot, existing_rand = [], []
     if not force_rerun and os.path.exists(null_cache_file):
@@ -276,7 +307,7 @@ def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_
         if 'null_profiles_rand' in data_cache: existing_rand = list(data_cache['null_profiles_rand'])
     
     null_profiles_rot = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_rot) if n_rotations > 0 else np.array([])
-    null_profiles_rand = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, common_mask, effective_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_rand) if n_random_factor > 0 else np.array([])
+    null_profiles_rand = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, common_mask, random_position_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_rand) if n_random_factor > 0 else np.array([])
 
     if n_rotations > 0 or n_random_factor > 0:
         np.savez(null_cache_file, null_profiles_rot=null_profiles_rot, null_profiles_rand= null_profiles_rand)

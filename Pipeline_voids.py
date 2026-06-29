@@ -2,7 +2,7 @@
 import sys
 import os
 import json
-import S1_voids as s1_voids
+import importlib
 
 #%% Logger
 class DualLogger(object):
@@ -30,7 +30,7 @@ config = {
                                         # If it is negative, only voids with delta_23 < delta_value are considered
     
     'zmin': 0.1, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
-    'rmin': 30.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
+    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
@@ -53,22 +53,28 @@ config = {
     'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
     'n_rand_factor': 15,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
     'n_rotations': 30,                  # Number of random rotations of the cmb map for cosmic variance estimation
-    
+    'random_pool': 'full',              # 'full'  -> randoms over the whole CMB-lensing footprint (common_mask)
+                                        # 'survey'-> randoms restricted to the void survey footprint (legacy)
+    'random_excl_factor': None,          # Exclude disks of (random_excl_factor * Rv) around real voids from the random pool. 0/None disables.
+
+    # Execution backend
+    'exec_backend': 'parallel',         # 'serial'   -> uses S1_voids
+                                        # 'parallel' -> uses S1_voids_parallel (multi-core stacking)
+    'n_workers': 80,                  # Number of worker processes for 'parallel' (None = all CPU cores)
+
     # MCMC setup
     'mcmc_walkers': 32, 
     'mcmc_steps': 2000, 
     'mcmc_discard': 500,
 
     # Step control
-    'run_step_1': True, 
-    
-    '''
-    # Not implemented yet for the analysis of the CMB, but the structure is left here for future implementation of the fit and MCMC steps.
-    'run_step_2': False, 
-    'run_step_3': False,
-    '''
+    'run_step_1': True,
+    # Not implemented yet for the analysis of the CMB, but the structure is left here
+    # for future implementation of the fit and MCMC steps.
+    # 'run_step_2': False,
+    # 'run_step_3': False,
 
-    'force_rerun': False
+    'force_rerun': True
 }
 
 #%% Auxiliary functions
@@ -83,6 +89,11 @@ def main():
 
     with open(os.path.join(config['output_folder'], "WHVoidsCMB_pipeline_config.json"), 'w') as f:
         json.dump(config, f, indent=4)
+
+    backend = config.get('exec_backend', 'serial')
+    step1_module = 'S1_voids_parallel' if backend == 'parallel' else 'S1_voids'
+    print(f"Execution backend: {backend} -> {step1_module}")
+    s1_voids = importlib.import_module(step1_module)
 
     try:
 
