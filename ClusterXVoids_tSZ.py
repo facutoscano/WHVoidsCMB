@@ -42,10 +42,11 @@ def build_samples(selected, config):
 
 def _save_suite(out, name, suite):
     d = {}
-    sector_keys = ('r', 'full', 'C', 'D', 'along', 'perp', 'up', 'down',
+    sector_keys = ('full', 'C', 'D', 'along', 'perp', 'up', 'down',
                    'diff_void', 'diff_fil', 'diff_parity')
     for blk in ('signal', 'parity'):
         s = suite[blk]
+        d[f'{blk}_r'] = s['r']
         for k in sector_keys:
             d[f'{blk}_{k}'] = s[k]
             d[f'{blk}_err_{k}'] = s[f'err_{k}']
