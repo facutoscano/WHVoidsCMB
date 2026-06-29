@@ -417,15 +417,7 @@ def run_suite(lon, lat, z, pa, cmb_map, mask, size_mpch, npix, bins,
 # ----------------------------------------------------------------------
 _NULL_COLORS = {'shuffled': 'xkcd:purple', 'random': 'xkcd:slate blue',
                 'rotated': 'xkcd:green'}
-_NULL_LABEL = {'shuffled': 'barajado', 'random': 'aleatorio', 'rotated': 'mapa rotado'}
-
-
-def _draw_octants(ax, half):
-    """Bordes de octantes (22.5+45k deg) sobre el panel del mapa orientado."""
-    for ang in np.arange(22.5, 360, 45.0):
-        a = np.radians(ang)
-        ax.plot([0, half * np.cos(a)], [0, half * np.sin(a)],
-                color='w', ls=':', lw=0.6, alpha=0.6)
+_NULL_LABEL = {'shuffled': 'shuffle', 'random': 'random', 'rotated': 'rotated maps'}
 
 
 def _plot_diff_panel(ax, r, diff, err, parity, nulls, which, ylabel):
@@ -437,7 +429,7 @@ def _plot_diff_panel(ax, r, diff, err, parity, nulls, which, ylabel):
                     parity[f'diff_{which}'] + parity[f'err_diff_{which}'],
                     color='xkcd:grey', alpha=0.22)
     handles = [plt.Line2D([], [], color='xkcd:crimson', marker='o', label='dato'),
-               Patch(color='xkcd:grey', alpha=0.22, label='paridad (sin orientar)')]
+               Patch(color='xkcd:grey', alpha=0.22, label='no orientation')]
     for mode, nd in nulls.items():
         n = nd[which]
         col = _NULL_COLORS.get(mode, 'xkcd:grey')
@@ -454,12 +446,12 @@ def _plot_diff_panel(ax, r, diff, err, parity, nulls, which, ylabel):
 def plot_suite(suite, outpath, size_mpch, label=""):
     """
     Figura 2x3:
-      (0,0) mapa orientado con bordes de octantes.
-      (0,1) perfiles cara (C) vs opuesta (D) + isótropo.
-      (0,2) diff_void = C - D, con paridad + nulls + p-values.
-      (1,0) chequeo de simetría arriba/abajo (diff_parity, debe ~0).
-      (1,1) perfiles a lo largo del filamento (N+S) vs perpendicular (W+E).
-      (1,2) diff_fil = along - perp, con paridad + nulls + p-values.
+      (0,0) mapa orientado.
+      (0,1) perfiles cara al void vs opuesto + isótropo.
+      (0,2) diff_void = (cara) - (opuesta), con no-orientación + nulls + p-values.
+      (1,0) vacío.
+      (1,1) perfiles tangencial al void (N+S) vs perpendicular (W+E).
+      (1,2) diff_fil = tangencial - perpendicular, con no-orientación + nulls.
     """
     import matplotlib.pyplot as plt
     sig = suite['signal']
@@ -471,16 +463,15 @@ def plot_suite(suite, outpath, size_mpch, label=""):
     # (0,0) mapa
     ext = [-size_mpch / 2, size_mpch / 2, -size_mpch / 2, size_mpch / 2]
     im = ax[0, 0].imshow(sig['map'], origin='lower', cmap='viridis', extent=ext)
-    _draw_octants(ax[0, 0], size_mpch / 2)
     ax[0, 0].set_title(f"Stack orientado (void=izq)\n{label}  N={suite['n']}")
     ax[0, 0].set_xlabel("Mpc/h"); ax[0, 0].set_ylabel("Mpc/h")
     plt.colorbar(im, ax=ax[0, 0], fraction=0.046)
 
     # (0,1) cara vs opuesta
     ax[0, 1].errorbar(r, sig['C'], yerr=sig['err_C'], fmt='o-', color='xkcd:teal',
-                      capsize=2, label='cara al void (C=NW+W+SW)')
+                      capsize=2, label='Cara al void')
     ax[0, 1].errorbar(r, sig['D'], yerr=sig['err_D'], fmt='s-', color='xkcd:orange',
-                      capsize=2, label='opuesta (D=NE+E+SE)')
+                      capsize=2, label='Opuesto al void')
     ax[0, 1].plot(r, sig['full'], 'k:', alpha=0.6, label='isótropo')
     ax[0, 1].axhline(0, color='k', ls=':', alpha=0.5)
     ax[0, 1].set_xlabel("r [Mpc/h]"); ax[0, 1].set_ylabel("señal")
@@ -489,21 +480,15 @@ def plot_suite(suite, outpath, size_mpch, label=""):
     # (0,2) diff_void
     _plot_diff_panel(ax[0, 2], r, sig['diff_void'], sig['err_diff_void'], par, nulls,
                      'void', "(cara al void) - (opuesta)")
-    ax[0, 2].set_title("Mirar al void")
 
-    # (1,0) simetría arriba/abajo (null interno)
-    ax[1, 0].axhline(0, color='k', ls=':', alpha=0.6)
-    ax[1, 0].errorbar(r, sig['diff_parity'], yerr=sig['err_diff_parity'], fmt='o-',
-                      color='xkcd:dark grey', capsize=2)
-    ax[1, 0].set_title("Simetría arriba/abajo (debe ~0)")
-    ax[1, 0].set_xlabel("r [Mpc/h]"); ax[1, 0].set_ylabel("up - down")
-    ax[1, 0].grid(alpha=0.25)
+    # (1,0) vacío
+    ax[1, 0].axis('off')
 
-    # (1,1) along vs perp
+    # (1,1) tangencial vs perpendicular
     ax[1, 1].errorbar(r, sig['along'], yerr=sig['err_along'], fmt='o-',
-                      color='xkcd:purple', capsize=2, label='a lo largo del filamento (N+S)')
+                      color='xkcd:purple', capsize=2, label='Tangencial al void')
     ax[1, 1].errorbar(r, sig['perp'], yerr=sig['err_perp'], fmt='s-',
-                      color='xkcd:goldenrod', capsize=2, label='perpendicular / eje void (W+E)')
+                      color='xkcd:goldenrod', capsize=2, label='Perpendicular al void')
     ax[1, 1].plot(r, sig['full'], 'k:', alpha=0.6, label='isótropo')
     ax[1, 1].axhline(0, color='k', ls=':', alpha=0.5)
     ax[1, 1].set_xlabel("r [Mpc/h]"); ax[1, 1].set_ylabel("señal")
@@ -511,8 +496,7 @@ def plot_suite(suite, outpath, size_mpch, label=""):
 
     # (1,2) diff_fil
     _plot_diff_panel(ax[1, 2], r, sig['diff_fil'], sig['err_diff_fil'], par, nulls,
-                     'fil', "(a lo largo filamento) - (perp)")
-    ax[1, 2].set_title("Elongación del filamento")
+                     'fil', "tangencial - perpendicular")
 
     plt.tight_layout()
     plt.savefig(outpath, dpi=200, bbox_inches='tight')

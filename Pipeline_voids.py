@@ -25,7 +25,7 @@ config = {
     'N_seeds': 50,                      # Number of random seeds used to identify voids. 
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': None,                # If None = no filter. 
+    'delta_value': 0.01,                # If None = no filter. 
                                         # If it is positive only voids with delta_23 > delta_value are considered. 
                                         # If it is negative, only voids with delta_23 < delta_value are considered
     
@@ -42,7 +42,7 @@ config = {
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 1,                        
+    'n_bins': 3,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  

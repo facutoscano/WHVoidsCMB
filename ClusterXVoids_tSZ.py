@@ -28,6 +28,23 @@ import cluster_void_assoc as cva
 import oriented_stacking as ost
 
 
+def _file_suffix(config, lam):
+    """
+    Identificador de la corrida (selección + geometría). Las muestras se guardan
+    como tSZ_oriented_{name}_{suffix}.{npz,pdf}; si el .npz existe, no se recalcula.
+    Campos: zmin_zmax_rmin_rmax_lambdamin_ztype_maxlosincldeg_delta23split_sizempch.
+    """
+    def f(x):
+        return 'None' if x is None else f'{x:g}'
+    return (f"z{f(config['zmin'])}-{f(config['zmax'])}"
+            f"_r{f(config['rmin'])}-{f(config['rmax'])}"
+            f"_lam{f(lam)}"
+            f"_{config.get('z_type') or 'any'}"
+            f"_los{f(config.get('max_los_incl_deg'))}"
+            f"_d23{f(config.get('delta23_split'))}"
+            f"_sz{f(config['size_mpch'])}")
+
+
 def build_samples(selected, config):
     scan = config.get('richness_scan')
     if scan:
@@ -40,7 +57,7 @@ def build_samples(selected, config):
     return {'all': selected}
 
 
-def _save_suite(out, name, suite):
+def _save_suite(out, name, suffix, suite):
     d = {}
     sector_keys = ('full', 'C', 'D', 'along', 'perp', 'up', 'down',
                    'diff_void', 'diff_fil', 'diff_parity')
@@ -61,7 +78,7 @@ def _save_suite(out, name, suite):
             d[f'{tag}_T_null'] = s['T_null']
             d[f'{tag}_T_signal'] = np.array(s['T_signal'])
             d[f'{tag}_p_value'] = np.array(s['p_value'])
-    np.savez(os.path.join(out, f"tSZ_oriented_{name}.npz"), **d)
+    np.savez(os.path.join(out, f"tSZ_oriented_{name}_{suffix}.npz"), **d)
 
 
 def _print_summary(name, suite):
@@ -121,15 +138,29 @@ def run(config):
     cva.plot_association_mollview(voids, selected,
                                   os.path.join(out, "assoc_mollview.pdf"))
 
+    # ---- muestras + caché por file_suffix -----------------------------
+    suffix = _file_suffix(config, lam_pre)
+    print(f"[driver] file_suffix = {suffix}")
+    samples = build_samples(selected, config)
+    print("[driver] muestras: " + ", ".join(f"{k}(N={len(v)})" for k, v in samples.items()))
+    pending = {}
+    for name, s in samples.items():
+        npz_path = os.path.join(out, f"tSZ_oriented_{name}_{suffix}.npz")
+        if os.path.exists(npz_path):
+            print(f"[driver] '{name}' ya calculado para este suffix; salteo.")
+        elif len(s) < config['n_subsamples']:
+            print(f"[driver] muestra '{name}' N={len(s)} < n_subsamples; salteo.")
+        else:
+            pending[name] = s
+    if not pending:
+        print("[driver] nada pendiente para este file_suffix.\n\n=== LISTO ===")
+        return
+
     # ---- mapa Compton-Y + máscara -------------------------------------
     print("\n>>> Lectura mapa Compton-Y")
     ymap = hp.read_map(f"{df}CMB/Compton_y/Compton-SZMap-NILC-ymap_2048_PR4.fits")
     ymask = hp.read_map(f"{df}CMB/Temperature/Common_mask_Temperature_2048.fits")
     ymask = np.where(ymask >= 0.9, 1.0, 0.0)
-
-    # ---- 3-4. suite por submuestra ------------------------------------
-    samples = build_samples(selected, config)
-    print("[driver] muestras: " + ", ".join(f"{k}(N={len(v)})" for k, v in samples.items()))
 
     size_mpch = config['size_mpch']
     npix = config['npix_stamp']
@@ -138,18 +169,15 @@ def run(config):
     rng = np.random.default_rng(123)
 
     print("\n>>> 3-4. Stacking orientado + suite de nulls (MC)")
-    for name, s in samples.items():
-        if len(s) < config['n_subsamples']:
-            print(f"[driver] muestra '{name}' N={len(s)} < n_subsamples; salteo.")
-            continue
+    for name, s in pending.items():
         suite = ost.run_suite(s['l'].values, s['b'].values, s['zCl'].values,
                               s['PA_void_deg'].values, ymap, ymask, size_mpch,
                               npix, bins, pa_sign=ps, pa_offset=po,
                               n_subsamples=config['n_subsamples'],
                               n_null_real=config['n_null_real'], rng=rng, label=name)
-        ost.plot_suite(suite, os.path.join(out, f"tSZ_oriented_{name}.pdf"),
+        ost.plot_suite(suite, os.path.join(out, f"tSZ_oriented_{name}_{suffix}.pdf"),
                        size_mpch, label=name)
-        _save_suite(out, name, suite)
+        _save_suite(out, name, suffix, suite)
         _print_summary(name, suite)
 
     print("\n=== LISTO ===")
