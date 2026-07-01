@@ -555,3 +555,55 @@ def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
     plt.tight_layout()
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
+
+
+def plot_merge_vs_concat(pair_list, output_path, max_Rvoid):
+    """
+    Compara, por bin, el perfil kappa(r) del catálogo CONCATENADO (multi-seed con
+    duplicados) contra el catálogo MERGEADO (DBSCAN, un void por fila).
+      Fila superior: kappa(r) de ambos con error JK.
+      Fila inferior: diferencia (concat - merge) con error combinado en cuadratura.
+    Cada `pair` es {'bin_id', 'key', 'concat': res, 'merge': res}.
+    """
+    n = len(pair_list)
+    if n == 0:
+        return
+    fig, axes = plt.subplots(2, n, figsize=(5.5 * n, 8),
+                             gridspec_kw={'hspace': 0.28, 'wspace': 0.2}, squeeze=False)
+
+    for col, pair in enumerate(pair_list):
+        c, m = pair['concat'], pair['merge']
+        r = c['r_frac']
+
+        ax_p = axes[0, col]
+        ax_p.axhline(0, color='k', linestyle=':', alpha=0.5)
+        ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7)
+        ax_p.errorbar(r, c['profile'] * 1e3, yerr=c['error'] * 1e3, fmt='o-',
+                      color='xkcd:steel blue', capsize=3, linewidth=1.8,
+                      label=f"Concat (N={c.get('n_voids', '?')})")
+        ax_p.errorbar(r, m['profile'] * 1e3, yerr=m['error'] * 1e3, fmt='s-',
+                      color='xkcd:crimson', capsize=3, linewidth=1.8,
+                      label=f"Merge (N={m.get('n_voids', '?')})")
+        ax_p.set_title(f"Bin {pair.get('bin_id', col) + 1}  (z={c.get('z_mean', np.nan):.3f})")
+        ax_p.set_xlim(-0.05, max_Rvoid + 0.05)
+        ax_p.tick_params(labelbottom=False)
+        ax_p.grid(True, alpha=0.25)
+        ax_p.legend(loc='lower right', frameon=True, fontsize=9)
+        if col == 0: ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        else: ax_p.tick_params(labelleft=False)
+
+        ax_d = axes[1, col]
+        diff = (c['profile'] - m['profile']) * 1e3
+        derr = np.sqrt(c['error'] ** 2 + m['error'] ** 2) * 1e3
+        ax_d.axhline(0, color='k', linestyle=':', alpha=0.6)
+        ax_d.axvline(1.0, color='gray', linestyle='--', alpha=0.7)
+        ax_d.errorbar(r, diff, yerr=derr, fmt='o-', color='xkcd:dark grey', capsize=3)
+        ax_d.set_xlim(-0.05, max_Rvoid + 0.05)
+        ax_d.set_xlabel(r'$r\,/\,R_v$')
+        ax_d.grid(True, alpha=0.25)
+        if col == 0: ax_d.set_ylabel(r'concat $-$ merge $\;[10^{-3}]$')
+        else: ax_d.tick_params(labelleft=False)
+
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"Merge-vs-concat comparison plot saved to {output_path}")
