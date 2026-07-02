@@ -13,6 +13,40 @@ import Functions_module as fm
 import Parallel_module as pm
 import void_seed_merge as vsm
 
+
+def _catalog_spec(catalog, data_folder):
+    """Rutas, columnas de coordenadas y frame por catálogo. Ambos comparten el
+    mismo layout de columnas; WH está en galáctico (l,b), BOSS en ecuatorial (ra,dec)."""
+    label = (catalog or 'WH').upper()
+    if label == 'BOSS':
+        return {
+            'label': 'BOSS',
+            'seed_template': f'{data_folder}/CATALOGOS/BOSS_voids_merge/voids_boss_{{:03d}}.dat',
+            'single_file': f'{data_folder}/CATALOGOS/BOSS_voids.dat',
+            'lon_col': 'ra', 'lat_col': 'dec', 'frame': 'icrs',
+        }
+    return {
+        'label': 'WH',
+        'seed_template': f'{data_folder}/CATALOGOS/WenHan_voids_z0.6/voids_z0.6_{{:03d}}.dat',
+        'single_file': f'{data_folder}/CATALOGOS/WenHan_voids.dat',
+        'lon_col': 'l', 'lat_col': 'b', 'frame': 'galactic',
+    }
+
+
+def _ensure_galactic(df, cat):
+    """Garantiza columnas galácticas 'l','b'. WH ya las tiene; BOSS se convierte
+    desde (ra,dec) ICRS para que todo el stacking/merge downstream use galácticas
+    (el mapa de lensing de Planck está en galácticas)."""
+    if cat['frame'] == 'galactic':
+        return df
+    c = SkyCoord(ra=df[cat['lon_col']].values * u.degree,
+                 dec=df[cat['lat_col']].values * u.degree, frame='icrs').galactic
+    df = df.copy()
+    df['l'] = c.l.degree
+    df['b'] = c.b.degree
+    return df
+
+
 #%% Run pipeline function
 def run_pipeline(config):
     data_folder = config['data_folder']
@@ -48,6 +82,12 @@ def run_pipeline(config):
     merge_min_frac = config.get('merge_min_frac', 0.2)
     merge_use_xyz = config.get('merge_use_catalog_xyz', False)
 
+    # Void catalogue: 'WH' (galactic l,b) or 'BOSS' (equatorial ra,dec).
+    void_catalog = config.get('void_catalog', 'WH')
+    cat = _catalog_spec(void_catalog, data_folder)
+    cat_label = cat['label']
+    force_rerun = config.get('force_rerun', False)
+
     mode_label = f"{binning_mode}_{n_bins_quantile}bins"
     delta_23_value = config.get('delta_value', None)
 
@@ -66,20 +106,35 @@ def run_pipeline(config):
     else:
         filter_label = 'no_filter'
 
-    file_suffix = (f'{release}_{mode_label}_{exec_mode}_'
+    base_suffix = (f'{release}_{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
                    f'{delta_label}_{filter_label}')
+    file_suffix = f'{cat_label}_{base_suffix}'
 
     run_folder = os.path.join(output_folder, file_suffix)
+    legacy_folder = os.path.join(output_folder, base_suffix)   # corridas previas sin prefijo (solo WH)
+
+    # Migración de corridas WH viejas (carpeta sin prefijo de catálogo): si existe y
+    # no se fuerza el rerun, se renombra a WH_... y se saltea el análisis.
+    if (not force_rerun) and cat_label == 'WH' and os.path.isdir(legacy_folder) \
+            and not os.path.isdir(run_folder):
+        os.rename(legacy_folder, run_folder)
+        print(f'[migrate] Carpeta legacy encontrada: renombrada\n'
+              f'    {base_suffix}\n -> {file_suffix}\n'
+              f'  y se saltea el análisis (force_rerun=False).')
+        return
+
     if not os.path.exists(run_folder):
         os.makedirs(run_folder)
 
-    stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks/")
+    # Caché separada por catálogo para que WH y BOSS no colisionen (los nombres de
+    # cache dependen de z/r/N, no del catálogo).
+    stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks", cat_label)
     if not os.path.exists(stacks_cache_folder):
         os.makedirs(stacks_cache_folder)
 
-    print('######### CMB LENSING PROFILES USING WEN HAN ET AL. 2024 VOIDS CATALOGUE [PARALLEL] #########')
+    print(f'######### CMB LENSING PROFILES USING {cat_label} VOIDS CATALOGUE [PARALLEL] #########')
     print(f'Configuration: Release={release} | Mode={exec_mode} | Binning={binning_mode} | n_workers={n_workers or os.cpu_count()}')
     print(f'Output Run Folder: {run_folder}')
     print('')
@@ -108,7 +163,7 @@ def run_pipeline(config):
     print('')
 
     #%% Reading and selecting voids data
-    print('Reading Wen-Han voids catalogue...')
+    print(f'Reading {cat_label} voids catalogue...')
     n_seeds = config.get('N_seeds', None)
 
     def apply_delta_23_filter(df, delta_value):
@@ -121,20 +176,24 @@ def run_pipeline(config):
 
     if n_seeds is not None:
         print(f"Reading {n_seeds} voids catalogues identified with different random seeds...")
-        col_names = ['R_void', 'l', 'b', 'z', 'x', 'y', 'z_cart', 'delta_int', 'delta_23', 'completeness', 'delta_LOS']
+        col_names = ['R_void', cat['lon_col'], cat['lat_col'], 'z', 'x', 'y', 'z_cart',
+                     'delta_int', 'delta_23', 'completeness', 'delta_LOS']
         voids_data = {}
         final_data = {}
         for seed in range(n_seeds):
-            file_path = f'{data_folder}/CATALOGOS/WenHan_voids_z0.6/voids_z0.6_{(seed+1):03d}.dat'
-            voids_data[seed] = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
+            file_path = cat['seed_template'].format(seed + 1)
+            df_seed = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
+            df_seed = _ensure_galactic(df_seed, cat)          # agrega l,b galácticas si es BOSS
+            voids_data[seed] = df_seed
 
-            base_filter = (voids_data[seed]['z'] >= zmin) & (voids_data[seed]['z'] < zmax) & (voids_data[seed]['R_void'] >= rmin) & (voids_data[seed]['R_void'] <= rmax) & (voids_data[seed]['completeness'] > 1.9)
-            filtered_data = voids_data[seed][base_filter].copy()
+            base_filter = (df_seed['z'] >= zmin) & (df_seed['z'] < zmax) & (df_seed['R_void'] >= rmin) & (df_seed['R_void'] <= rmax) & (df_seed['completeness'] > 1.9)
+            filtered_data = df_seed[base_filter].copy()
             final_data[seed] = apply_delta_23_filter(filtered_data, delta_23_value)
         print('All voids data loaded.\n')
     else:
-        col_names = ['R_void', 'l', 'b', 'z']
-        voids_data_raw = pd.read_csv(f'{data_folder}/CATALOGOS/WenHan_voids.dat', sep='\s+', names=col_names, header=None)
+        col_names = ['R_void', cat['lon_col'], cat['lat_col'], 'z']
+        voids_data_raw = pd.read_csv(cat['single_file'], sep='\s+', names=col_names, header=None)
+        voids_data_raw = _ensure_galactic(voids_data_raw, cat)
         final_data = voids_data_raw[
             (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) &
             (voids_data_raw['R_void'] >= rmin) & (voids_data_raw['R_void'] <= rmax)

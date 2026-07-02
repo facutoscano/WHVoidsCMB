@@ -22,10 +22,11 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'N_seeds': 50,                      # Number of random seeds used to identify voids. 
+    'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
+    'N_seeds': 50,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': 0.01,                # If None = no filter.
+    'delta_value': -0.01,                # If None = no filter.
                                         # If it is positive only voids with delta_23 > delta_value are considered.
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
@@ -48,7 +49,7 @@ config = {
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
-    'n_bins': 3,                        
+    'n_bins': 1,                        
 
     # Fitting setup
     'rmin_fit_mpc': 0.5,  
@@ -66,7 +67,7 @@ config = {
     # Execution backend
     'exec_backend': 'parallel',         # 'serial'   -> uses S1_voids
                                         # 'parallel' -> uses S1_voids_parallel (multi-core stacking)
-    'n_workers': 80,                  # Number of worker processes for 'parallel' (None = all CPU cores)
+    'n_workers': 100,                  # Number of worker processes for 'parallel' (None = all CPU cores)
 
     # MCMC setup
     'mcmc_walkers': 32, 
@@ -80,7 +81,7 @@ config = {
     # 'run_step_2': False,
     # 'run_step_3': False,
 
-    'force_rerun': True
+    'force_rerun': False
 }
 
 #%% Auxiliary functions
