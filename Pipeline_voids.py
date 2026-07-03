@@ -23,7 +23,7 @@ config = {
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
     'void_catalog': 'BOSS',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
-    'N_seeds': 50,                      # Number of random seeds used to identify voids.
+    'N_seeds': 100,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
     'delta_value': None,                # If None = no filter.
@@ -31,13 +31,13 @@ config = {
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
     # Multi-seed catalogue handling (only used when N_seeds is not None)
-    'seed_mode': 'both',                # 'concat' (legacy, duplicates) | 'merge' (DBSCAN single catalogue) | 'both'
+    'seed_mode': 'merge',                # 'concat' (legacy, duplicates) | 'merge' (DBSCAN single catalogue) | 'both'
     'merge_eps_mpch': 8.0,              # DBSCAN linking length [Mpc/h] for the merge
     'merge_min_frac': 0.4,             # min fraction of seeds to keep a void (min_samples = merge_min_frac * N_seeds)
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); True -> use catalogue x,y,z_cart
     
-    'zmin': 0.2, 'zmax': 0.6,        # zmin = 0.051 zmax = 0.583 
-    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
+    'zmin': 0.3, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
+    'rmin': 30.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
@@ -87,14 +87,17 @@ config = {
 #%% Auxiliary functions
 def main():
     
-    log_path = os.path.join(config['output_folder'], "pipeline_run.log")
+    lensing_out = os.path.join(config['output_folder'], 'lensing')
+    os.makedirs(lensing_out, exist_ok=True)
+
+    log_path = os.path.join(lensing_out, "pipeline_run.log")
     sys.stdout = DualLogger(log_path)
-    
+
     title = "WEN-HAN VOIDS x CMB LENSING PROFILES"
     print(f"### PIPELINE RUN: {title} ###")
-    print(f"Output: {config['output_folder']}")
+    print(f"Output: {lensing_out}")
 
-    with open(os.path.join(config['output_folder'], "WHVoidsCMB_pipeline_config.json"), 'w') as f:
+    with open(os.path.join(lensing_out, "WHVoidsCMB_pipeline_config.json"), 'w') as f:
         json.dump(config, f, indent=4)
 
     backend = config.get('exec_backend', 'serial')
@@ -120,7 +123,7 @@ def main():
             s3_voids.run_pipeline(config)
         ''' 
 
-        with open(os.path.join(config['output_folder'], "SUCCESS"), 'w') as f: f.write("Done.")
+        with open(os.path.join(lensing_out, "SUCCESS"), 'w') as f: f.write("Done.")
         print("\n=== FINISHED ===")
 
     except Exception as e:

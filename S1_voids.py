@@ -11,7 +11,8 @@ import Functions_module as fm
 #%% Run pipeline function
 def run_pipeline(config):
     data_folder = config['data_folder']
-    output_folder = config['output_folder']
+    output_folder = os.path.join(config['output_folder'], 'lensing')   # Results/lensing/
+    os.makedirs(output_folder, exist_ok=True)
     release = config['release']
     zmin, zmax = config['zmin'], config['zmax']
     rmin, rmax = config['rmin'], config['rmax']

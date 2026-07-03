@@ -73,13 +73,14 @@ tests calibrate what a non-detection looks like:
   random pool so the null cannot accidentally pick up real void signal.
 
 ### Caching and run folders
-Stacking is expensive, so every signal and null-test result is cached to
-`Results/Cache_Stacks/` (under a per-catalogue subfolder, so WH and BOSS never
-collide) and reused unless `force_rerun = True`. Each run also gets its own
-output folder whose name encodes every parameter that matters — catalogue,
-release, binning, redshift and radius ranges, $R_v$ scale, the density-contrast
-cut and the filter — so different configurations never overwrite each other and
-are trivial to compare.
+All lensing output lives under `Results/lensing/`. Stacking is expensive, so
+every signal and null-test result is cached to `Results/lensing/Cache_Stacks/`
+(under a per-catalogue subfolder, so WH and BOSS never collide) and reused unless
+`force_rerun = True`. Each run also gets its own folder under `Results/lensing/`
+whose name encodes every parameter that matters — catalogue, release, binning,
+redshift and radius ranges, $R_v$ scale, the density-contrast cut and the
+filter — so different configurations never overwrite each other and are trivial
+to compare.
 
 
 
@@ -111,6 +112,15 @@ on healpy's projector convention, the orientation must be calibrated once with
 pa_offset)` fed back into the config. Significance is assessed with an empirical
 Monte-Carlo null suite: shuffled position angles, random position angles, and
 rigid rotations of the catalogue over the real map.
+
+The clusters are always the Wen & Han ones, but the voids they are hung on can be
+either catalogue (`void_catalog = 'WH'` or `'BOSS'`); BOSS positions are rotated
+from $(\mathrm{RA}, \mathrm{Dec})$ to galactic first. Running both is a check
+that the anisotropy survives against a different void sample. Each run writes to
+`Results/tSZ/{catalogue}_{release}_{...}/` — the same suffix convention as the
+lensing side — holding the association map, the oriented-stack plots and the
+`.npz` results. If those `.npz` are already there they are not recomputed unless
+`force_rerun = True`.
 
 
 
@@ -173,8 +183,11 @@ backend. The `rmin_fit_mpc`, `rmax_fit_mpc` and `mcmc_*` entries are placeholder
 for the fitting/MCMC steps, which are stubbed out for now.
 
 The tSZ analysis has its own `config` at the bottom of `ClusterXVoids_tSZ.py`
-(shell limits `f_min`/`f_max`, the LOS-inclination cut, the richness scan, the
-octant orientation `pa_sign`/`pa_offset`, and the Monte-Carlo null settings).
+(`void_catalog`, `release`, `force_rerun`, the shell limits `f_min`/`f_max`, the
+LOS-inclination cut, the richness scan, the octant orientation
+`pa_sign`/`pa_offset`, and the Monte-Carlo null settings). Its `output_folder` is
+the `Results/` base; the code builds the `tSZ/{catalogue}_{release}_{...}/`
+subfolder itself.
 
 
 ## Running
@@ -183,12 +196,20 @@ python Pipeline_voids.py        # lensing profiles
 python ClusterXVoids_tSZ.py     # tSZ oriented stacking
 ```
 
-The lensing output goes to `Results/{catalogue}_{...}/`; the tSZ output to the
-folder set in its own config.
+Everything lands under `Results/`, split into two trees:
+
+```
+Results/
+├── lensing/                      # Pipeline_voids.py
+│   ├── Cache_Stacks/             # stacking cache (per catalogue)
+│   └── {catalogue}_{release}_{...}/   # one folder per run
+└── tSZ/                          # ClusterXVoids_tSZ.py
+    └── {catalogue}_{release}_{...}/   # one folder per run
+```
 
 
 ## Outputs
-Lensing, per run folder:
+Lensing, inside each `Results/lensing/{suffix}/` folder:
 
 | File | Content |
 |------|---------|
@@ -198,16 +219,16 @@ Lensing, per run folder:
 | `Merge_vs_Concat_{suffix}.pdf` | Merged vs. concatenated profile and their difference (`seed_mode = 'both'`) |
 | `Data_FullRun_{suffix}.pkl` | Full results: profiles, covariance, maps, nulls, and the config |
 
+tSZ, inside each `Results/tSZ/{suffix}/` folder (one row per richness/`delta_23` sample):
 
-tSZ:
 | File | Content |
 |------|---------|
 | `assoc_mollview.pdf` | Voids and their associated clusters on the sphere |
-| `tSZ_oriented_{sample}_{suffix}.pdf` | Oriented stack, facing-void and filament profiles, null bands |
-| `tSZ_oriented_{sample}_{suffix}.npz` | Profiles, covariances and Monte-Carlo null distributions |
+| `tSZ_oriented_{sample}.pdf` | Oriented stack, facing-void and filament profiles, null bands |
+| `tSZ_oriented_{sample}.npz` | Profiles, covariances and Monte-Carlo null distributions |
 
-At the output root, `pipeline_run.log` and `WHVoidsCMB_pipeline_config.json`
-record the run for reproducibility.
+`Results/lensing/` also holds `pipeline_run.log` and
+`WHVoidsCMB_pipeline_config.json`, which record the run for reproducibility.
 
 
 ## Data
