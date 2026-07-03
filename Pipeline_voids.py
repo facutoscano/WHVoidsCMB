@@ -22,21 +22,21 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
+    'void_catalog': 'BOSS',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 50,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': -0.01,                # If None = no filter.
+    'delta_value': None,                # If None = no filter.
                                         # If it is positive only voids with delta_23 > delta_value are considered.
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
     # Multi-seed catalogue handling (only used when N_seeds is not None)
     'seed_mode': 'both',                # 'concat' (legacy, duplicates) | 'merge' (DBSCAN single catalogue) | 'both'
-    'merge_eps_mpch': 5.0,              # DBSCAN linking length [Mpc/h] for the merge
-    'merge_min_frac': 0.2,             # min fraction of seeds to keep a void (min_samples = merge_min_frac * N_seeds)
+    'merge_eps_mpch': 8.0,              # DBSCAN linking length [Mpc/h] for the merge
+    'merge_min_frac': 0.4,             # min fraction of seeds to keep a void (min_samples = merge_min_frac * N_seeds)
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); True -> use catalogue x,y,z_cart
     
-    'zmin': 0.1, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
+    'zmin': 0.2, 'zmax': 0.6,        # zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
