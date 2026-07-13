@@ -233,10 +233,10 @@ if __name__ == "__main__":
         'data_folder': '/home/ftoscano/Doctorado/Data/',
         # base de resultados: el código arma  {output_folder}/tSZ/{Cat}_{Release}_{...}/
         'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
-        'void_catalog': 'WH',         # 'WH' (l,b) o 'BOSS' (ra,dec -> l,b). Cúmulos siempre WH.
+        'void_catalog': 'BOSS',         # 'WH' (l,b) o 'BOSS' (ra,dec -> l,b). Cúmulos siempre WH.
         'release': 'PR4',
         'force_rerun': False,         # True -> recalcula aunque exista el .npz
-        'zmin': 0.1, 'zmax': 0.6, 'rmin': 35.0, 'rmax': 70.,
+        'zmin': 0.1, 'zmax': 0.5, 'rmin': 35.0, 'rmax': 70.,
         'N_seeds': 100, 'lambda_min': 45, 'z_type': 'spec',
         # dedup
         'merge_eps_mpch': 8.0, 'merge_min_frac': 0.3,
@@ -245,12 +245,12 @@ if __name__ == "__main__":
         'rpar_max_frac': None,
         'max_los_incl_deg': 30.0,
         # stacking
-        'size_mpch': 24.0, 'npix_stamp': 200, 'n_radial_bins': 5, 'n_subsamples': 25,
+        'size_mpch': 30.0, 'npix_stamp': 200, 'n_radial_bins': 5, 'n_subsamples': 25,
         # significancia: realizaciones MC del null (>=100 para p~0.01 de resolución)
         'n_null_real': 100,
         # muestras: escaneo de riqueza (precede a delta23). None -> usa delta23/all.
         'richness_scan': None,
-        'delta23_split': None,        # None -> 'all'; float -> open/closed (si scan=None)
+        'delta23_split': 0.,        # None -> 'all'; float -> open/closed (si scan=None)
         # orientación (de calibrate_orientation())
         'pa_sign': -1.0, 'pa_offset': 90.0,
     }
