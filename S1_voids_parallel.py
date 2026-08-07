@@ -322,7 +322,8 @@ def run_pipeline(config):
             result.update({
                 'bin_id': info['id'],
                 'binning_mode': binning_mode,
-                'is_multi_seed': False
+                'is_multi_seed': False,
+                'R_void_median': float(np.median(data_bin['R_void'].values))
                 })
             bin_results_list.append(result)
     else:
@@ -352,6 +353,7 @@ def run_pipeline(config):
                         random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers
                     )
                     result['seed'] = seed
+                    result['R_void_median'] = float(np.median(si['data']['R_void'].values))
                     seed_results.append(result)
 
                 nonempty = [s for s in range(n_seeds) if len(entry['seed_subsets'][s]['data']) > 0]
@@ -379,7 +381,8 @@ def run_pipeline(config):
                                                               random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers)
                     result_combined.update({
                         'bin_id': bin_id, 'binning_mode': binning_mode,
-                        'is_multi_seed': True, 'seed_results': seed_results
+                        'is_multi_seed': True, 'seed_results': seed_results,
+                        'R_void_median': float(np.median(all_data_bin['R_void'].values))
                         })
                     bin_results_list.append(result_combined)
 
@@ -405,11 +408,17 @@ def run_pipeline(config):
                                                           random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers)
                 result_merged.update({
                     'bin_id': bin_id, 'binning_mode': binning_mode,
-                    'is_multi_seed': False, 'is_merged': True
+                    'is_multi_seed': False, 'is_merged': True,
+                    'R_void_median': float(np.median(msub['data']['R_void'].values))
                     })
                 (merged_results_list if do_concat else bin_results_list).append(result_merged)
 
     # SAVING
+    # mediana de R_void por muestra: se imprime y se guarda dentro de 'parameters' del .pkl.
+    rvoid_summary = fm.build_rvoid_summary(bin_results_list, merged_results_list)
+    parameters = dict(config)
+    parameters['R_void_median_per_sample'] = rvoid_summary
+
     print('Saving results...')
 
     output_plot_path = os.path.join(run_folder, f'Stacked_Maps_NullTests_{file_suffix}.pdf')
@@ -436,7 +445,7 @@ def run_pipeline(config):
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
     with open(data_save_path, 'wb') as f:
         pickle.dump({'bins_data': bin_results_list,
-                     'merged_data': merged_results_list, 'parameters': config}, f)
+                     'merged_data': merged_results_list, 'parameters': parameters}, f)
         print(f"Data saved in: {data_save_path}")
 
 if __name__ == "__main__":

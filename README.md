@@ -219,6 +219,13 @@ Lensing, inside each `Results/lensing/{suffix}/` folder:
 | `Merge_vs_Concat_{suffix}.pdf` | Merged vs. concatenated profile and their difference (`seed_mode = 'both'`) |
 | `Data_FullRun_{suffix}.pkl` | Full results: profiles, covariance, maps, nulls, and the config |
 
+The `parameters` entry of the `.pkl` is the run config plus
+`R_void_median_per_sample`: one record per bin and catalogue
+(`single`/`concat`/`merged`) with `bin_id`, `z_range`, `n_voids`, the median void
+radius `R_void_median` [Mpc/h] of the stacked sample and, for concatenated
+multi-seed runs, the mean and scatter of the per-seed medians. The same table is
+printed to screen (and to `pipeline_run.log`) at the end of the run.
+
 tSZ, inside each `Results/tSZ/{suffix}/` folder (one row per richness/`delta_23` sample):
 
 | File | Content |

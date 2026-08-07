@@ -187,7 +187,10 @@ def run(config):
 
     # ---- muestras + caché por npz -------------------------------------
     samples = build_samples(selected, config)
-    print("[driver] muestras: " + ", ".join(f"{k}(N={len(v)})" for k, v in samples.items()))
+    # N y mediana del R_void asociado (Mpc/h) de cada muestra de cúmulos
+    print("[driver] muestras: " + ", ".join(
+        f"{k}(N={len(v)}, med Rv={np.median(v['R_void']):.2f} Mpc/h)" if len(v) else f"{k}(N=0)"
+        for k, v in samples.items()))
     pending = {}
     for name, s in samples.items():
         npz_path = os.path.join(out, f"tSZ_oriented_{name}.npz")
@@ -233,11 +236,11 @@ if __name__ == "__main__":
         'data_folder': '/home/ftoscano/Doctorado/Data/',
         # base de resultados: el código arma  {output_folder}/tSZ/{Cat}_{Release}_{...}/
         'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
-        'void_catalog': 'BOSS',         # 'WH' (l,b) o 'BOSS' (ra,dec -> l,b). Cúmulos siempre WH.
+        'void_catalog': 'WH',         # 'WH' (l,b) o 'BOSS' (ra,dec -> l,b). Cúmulos siempre WH.
         'release': 'PR4',
         'force_rerun': False,         # True -> recalcula aunque exista el .npz
         'zmin': 0.1, 'zmax': 0.5, 'rmin': 35.0, 'rmax': 70.,
-        'N_seeds': 100, 'lambda_min': 45, 'z_type': 'spec',
+        'N_seeds': 100, 'lambda_min': 35, 'z_type': 'spec',
         # dedup
         'merge_eps_mpch': 8.0, 'merge_min_frac': 0.3,
         # asociación
@@ -250,7 +253,7 @@ if __name__ == "__main__":
         'n_null_real': 100,
         # muestras: escaneo de riqueza (precede a delta23). None -> usa delta23/all.
         'richness_scan': None,
-        'delta23_split': 0.,        # None -> 'all'; float -> open/closed (si scan=None)
+        'delta23_split': None,        # None -> 'all'; float -> open/closed (si scan=None)
         # orientación (de calibrate_orientation())
         'pa_sign': -1.0, 'pa_offset': 90.0,
     }

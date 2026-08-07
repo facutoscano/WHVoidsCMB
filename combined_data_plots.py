@@ -203,14 +203,6 @@ def discover_tsz(base, sel):
 # ----------------------------------------------------------------------
 # helpers de ploteo
 # ----------------------------------------------------------------------
-def _share_y(axes):
-    ys = [ax.get_ylim() for ax in axes if ax.has_data()]
-    if ys:
-        lo, hi = min(y[0] for y in ys), max(y[1] for y in ys)
-        for ax in axes:
-            ax.set_ylim(lo, hi)
-
-
 def _style_sn(ax, ylim, tick):
     """Cajita de S/N: eje y en `ylim`, ticks ±`tick`, línea punteada a 3σ, grid."""
     ax.set_ylim(*ylim)
@@ -285,11 +277,12 @@ def _plot_row_fil(ax_p, ax_s, case, sn_ylim, sn_tick, scale=1e7):
     _style_sn(ax_s, sn_ylim, sn_tick)
 
 
-# filas: (kind, plotter, ylabel, xlabel, sn_ylim, sn_tick)
+# filas: (kind, plotter, ylabel, xlabel, main_ylim, sn_ylim, sn_tick)
+# main_ylim fijo (mismo en todas las figuras) para poder comparar entre plots.
 ROWS = [
-    ('lensing', _plot_row_lensing, r'$\kappa$  [$10^{-3}$]', r'$r/R_v$', (-6, 6), 5),
-    ('void', _plot_row_void, r'compton-$y$ orientado  [$10^{-7}$]', r'$r$ [Mpc/h]', (-4, 4), 3),
-    ('fil', _plot_row_fil, r'compton-$y$ triaxialidad  [$10^{-7}$]', r'$r$ [Mpc/h]', (-4, 4), 3),
+    ('lensing', _plot_row_lensing, r'$\kappa$  [$10^{-3}$]', r'$r/R_v$', (-5, 1.5), (-6, 6), 5),
+    ('void', _plot_row_void, r'compton-$y$ orientado  [$10^{-7}$]', r'$r$ [Mpc/h]', (-1, 6), (-4, 4), 3),
+    ('fil', _plot_row_fil, r'compton-$y$ triaxial  [$10^{-7}$]', r'$r$ [Mpc/h]', (-1, 6), (-4, 4), 3),
 ]
 
 
@@ -310,7 +303,7 @@ def _make_case_figure(case_kind, lens, tsz, base, sel):
     fig = plt.figure(figsize=(9.5, 12.5))
     outer = fig.add_gridspec(3, 1, hspace=0.30)
 
-    for ri, (rkind, plotter, ylab, xlab, sn_ylim, sn_tick) in enumerate(ROWS):
+    for ri, (rkind, plotter, ylab, xlab, main_ylim, sn_ylim, sn_tick) in enumerate(ROWS):
         inner = outer[ri].subgridspec(2, 2, height_ratios=[3, 1],
                                       hspace=0.0, wspace=0.06)
         ax_p = [fig.add_subplot(inner[0, j]) for j in range(2)]
@@ -337,7 +330,8 @@ def _make_case_figure(case_kind, lens, tsz, base, sel):
 
         ax_p[0].set_ylabel(ylab)
         ax_s[0].set_ylabel('S/N')
-        _share_y(ax_p)
+        for a in ax_p:
+            a.set_ylim(*main_ylim)
 
     tag = (f"{sel['release']}_z{sel['zmin']}-{sel['zmax']}_r{sel['rmin']}-{sel['rmax']}"
            f"_maxRv{sel['max_Rvoid']:g}_{sel['n_bins']}bins")
@@ -396,7 +390,7 @@ if __name__ == "__main__":
         'max_Rvoid': 2.5,
         'npix_stamp': 400,      # -> reso = 2*max_Rvoid/npix_stamp
         'n_bins': 1,
-        'lambda_min': 35,       # corte de riqueza que nombra la carpeta tSZ (_lam..); None -> no filtra
+        'lambda_min': 45,       # corte de riqueza que nombra la carpeta tSZ (_lam..); None -> no filtra
 
         'out_path': None,       # None -> Results/Combined_{...}_{caso}.pdf
     }

@@ -352,6 +352,53 @@ def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_
 
     return final_result
 
+def build_rvoid_summary(bin_results_list, merged_results_list=None, print_table=True):
+    """Resumen por muestra del radio mediano de los voids apilados [Mpc/h].
+
+    Devuelve una lista de dicts (uno por bin y por catálogo: 'single'/'concat' y
+    'merged') pensada para guardarse dentro de 'parameters' en el .pkl de la corrida,
+    y la imprime por pantalla. En las corridas multi-seed concatenadas se agrega
+    además la media y la dispersión de las medianas de cada seed."""
+    def _kind(res):
+        if res.get('is_merged', False): return 'merged'
+        return 'concat' if res.get('is_multi_seed', False) else 'single'
+
+    def _entries(results):
+        out = []
+        for i, res in enumerate(results or []):
+            entry = {
+                'bin_id': int(res.get('bin_id', i)),
+                'catalog': _kind(res),
+                'z_range': res.get('key'),
+                'n_voids': int(res.get('n_voids', 0)),
+                'R_void_median': float(res.get('R_void_median', np.nan)),
+            }
+            r_seeds = [float(s['R_void_median']) for s in res.get('seed_results', [])
+                       if 'R_void_median' in s]
+            if r_seeds:
+                entry['R_void_median_seeds_mean'] = float(np.mean(r_seeds))
+                entry['R_void_median_seeds_std'] = float(np.std(r_seeds))
+            out.append(entry)
+        return out
+
+    summary = _entries(bin_results_list) + _entries(merged_results_list)
+    summary.sort(key=lambda e: (e['bin_id'], e['catalog']))
+
+    if print_table:
+        print('\n######### MEDIAN VOID RADIUS PER SAMPLE [Mpc/h] #########')
+        print(f"{'Bin':>4} {'Catalog':>8} {'z_range':>12} {'N':>8} {'med(Rv)':>8}   med(Rv) per seed")
+        for e in summary:
+            seeds_txt = ''
+            if 'R_void_median_seeds_mean' in e:
+                seeds_txt = (f"   {e['R_void_median_seeds_mean']:.2f} "
+                             f"+/- {e['R_void_median_seeds_std']:.2f}")
+            print(f"{e['bin_id']+1:>4} {e['catalog']:>8} {str(e['z_range']):>12} "
+                  f"{e['n_voids']:>8} {e['R_void_median']:>8.2f}{seeds_txt}")
+        print('')
+
+    return summary
+
+
 def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     n_bins = len(data_list)
     fig = plt.figure(figsize=(6 * n_bins, 12))

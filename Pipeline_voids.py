@@ -22,11 +22,11 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'void_catalog': 'BOSS',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
+    'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': -0.01,                # If None = no filter.
+    'delta_value': None,                # If None = no filter.
                                         # If it is positive only voids with delta_23 > delta_value are considered.
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
