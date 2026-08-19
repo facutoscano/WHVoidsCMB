@@ -45,16 +45,11 @@ config = {
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 20.0,        # Just used if filter_mode is 'gaussian'
-    'sigma_miscentering': 0.0,
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
     'n_bins': 1,                        
-
-    # Fitting setup
-    'rmin_fit_mpc': 0.5,  
-    'rmax_fit_mpc': 10.0, 
-    
+   
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
     'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
@@ -69,13 +64,19 @@ config = {
                                         # 'parallel' -> uses S1_voids_parallel (multi-core stacking)
     'n_workers': 100,                  # Number of worker processes for 'parallel' (None = all CPU cores)
 
+    
+    # Fitting setup
+    #'rmin_fit_mpc': 0.5,  
+    #'rmax_fit_mpc': 10.0, 
+
     # MCMC setup
-    'mcmc_walkers': 32, 
-    'mcmc_steps': 2000, 
-    'mcmc_discard': 500,
+    #'mcmc_walkers': 32, 
+    #'mcmc_steps': 2000, 
+    #'mcmc_discard': 500,
 
     # Step control
     'run_step_1': True,
+
     # Not implemented yet for the analysis of the CMB, but the structure is left here
     # for future implementation of the fit and MCMC steps.
     # 'run_step_2': False,
