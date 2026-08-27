@@ -240,16 +240,16 @@ def run_pipeline(config):
             merged_df = None
             edge_src = concat_all
 
-        _, z_edges = pd.qcut(edge_src[metric_col], n_bins_quantile,
+        _, bin_edges = pd.qcut(edge_src[metric_col], n_bins_quantile,
                              retbins=True, labels=False, duplicates='drop')
-        z_edges = np.asarray(z_edges, dtype=float).copy()
-        z_edges[0], z_edges[-1] = -np.inf, np.inf          # sin bins NaN en los bordes
-        n_bins_eff = len(z_edges) - 1
+        bin_edges = np.asarray(bin_edges, dtype=float).copy()
+        bin_edges[0], bin_edges[-1] = -np.inf, np.inf          # sin bins NaN en los bordes
+        n_bins_eff = len(bin_edges) - 1
 
         for s in range(n_seeds):
-            final_data[s]['bin_id'] = pd.cut(final_data[s][metric_col], z_edges, labels=False)
+            final_data[s]['bin_id'] = pd.cut(final_data[s][metric_col], bin_edges, labels=False)
         if merged_df is not None:
-            merged_df['bin_id'] = pd.cut(merged_df[metric_col], z_edges, labels=False)
+            merged_df['bin_id'] = pd.cut(merged_df[metric_col], bin_edges, labels=False)
 
         for i in range(n_bins_eff):
             seed_subsets, counts = {}, []
@@ -280,10 +280,9 @@ def run_pipeline(config):
     print('')
 
     #%% LOOP PRINCIPAL
-    print(f"\n######### Doing profiles in mode: {exec_mode} [PARALLEL] #########\n")
+    print(f"\n######### Doing profiles #########\n")
 
-    bin_results_list = []
-    merged_results_list = []
+    all_results = []
 
     if n_seeds is None:
         for info in bins_info_list:
@@ -322,10 +321,10 @@ def run_pipeline(config):
             result.update({
                 'bin_id': info['id'],
                 'binning_mode': binning_mode,
-                'is_multi_seed': False,
+                'catalog': 'single',
                 'R_void_median': float(np.median(data_bin['R_void'].values))
                 })
-            bin_results_list.append(result)
+            all_results.append(result)
     else:
         for entry in bins_info_list:
             bin_id = entry['id']
@@ -381,10 +380,10 @@ def run_pipeline(config):
                                                               random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers)
                     result_combined.update({
                         'bin_id': bin_id, 'binning_mode': binning_mode,
-                        'is_multi_seed': True, 'seed_results': seed_results,
+                        'catalog': 'concat', 'seed_results': seed_results,
                         'R_void_median': float(np.median(all_data_bin['R_void'].values))
                         })
-                    bin_results_list.append(result_combined)
+                    all_results.append(result_combined)
 
             # ---- catálogo único mergeado (DBSCAN) --------------------------
             if do_merge and entry.get('merged') and entry['merged']['coords'] is not None \
@@ -408,33 +407,35 @@ def run_pipeline(config):
                                                           random_pool=random_pool, random_excl_factor=random_excl_factor, n_workers=n_workers)
                 result_merged.update({
                     'bin_id': bin_id, 'binning_mode': binning_mode,
-                    'is_multi_seed': False, 'is_merged': True,
+                    'catalog': 'merged',
                     'R_void_median': float(np.median(msub['data']['R_void'].values))
                     })
-                (merged_results_list if do_concat else bin_results_list).append(result_merged)
+                all_results.append(result_merged)
 
     # SAVING
     # mediana de R_void por muestra: se imprime y se guarda dentro de 'parameters' del .pkl.
-    rvoid_summary = fm.build_rvoid_summary(bin_results_list, merged_results_list)
+    rvoid_summary = fm.build_rvoid_summary(all_results)
     parameters = dict(config)
     parameters['R_void_median_per_sample'] = rvoid_summary
 
     print('Saving results...')
 
     output_plot_path = os.path.join(run_folder, f'Stacked_Maps_NullTests_{file_suffix}.pdf')
-    fm.plot_stacked_maps_and_profiles(bin_results_list, output_plot_path, max_Rvoid)
+    fm.plot_stacked_maps_and_profiles(all_results, output_plot_path, max_Rvoid)
 
     jk_plot_path = os.path.join(run_folder, f'JK_Profile_Correlation_{file_suffix}.pdf')
-    fm.plot_jackknife_and_correlation(bin_results_list, jk_plot_path, max_Rvoid)
+    fm.plot_jackknife_and_correlation(all_results, jk_plot_path, max_Rvoid)
 
-    if any(d.get('is_multi_seed', False) for d in bin_results_list):
+    if any(d.get('catalog') == 'concat' for d in all_results):
         seeds_plot_path = os.path.join(run_folder, f'Seed_Consistency_{file_suffix}.pdf')
-        fm.plot_seed_consistency(bin_results_list, seeds_plot_path, max_Rvoid)
+        fm.plot_seed_consistency(all_results, seeds_plot_path, max_Rvoid)
 
-    if do_concat and do_merge and merged_results_list:
+    if do_concat and do_merge:
+        concat = [r for r in all_results if r['catalog'] in ('single', 'concat')]
+        merged = [r for r in all_results if r['catalog'] == 'merged']
         pairs = []
-        for rc in bin_results_list:
-            rm = next((m for m in merged_results_list if m['bin_id'] == rc.get('bin_id')), None)
+        for rc in concat:
+            rm = next((m for m in merged if m['bin_id'] == rc.get('bin_id')), None)
             if rm is not None:
                 pairs.append({'bin_id': rc['bin_id'], 'key': rc.get('key'),
                               'concat': rc, 'merge': rm})
@@ -444,8 +445,9 @@ def run_pipeline(config):
 
     data_save_path = os.path.join(run_folder, f'Data_FullRun_{file_suffix}.pkl')
     with open(data_save_path, 'wb') as f:
-        pickle.dump({'bins_data': bin_results_list,
-                     'merged_data': merged_results_list, 'parameters': parameters}, f)
+        pickle.dump({'results': all_results,
+                     'parameters': parameters},
+                     f)
         print(f"Data saved in: {data_save_path}")
 
 if __name__ == "__main__":

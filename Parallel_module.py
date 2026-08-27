@@ -90,8 +90,11 @@ def _random_null_parallel(executor, nside, redshifts, r_voids, position_mask, ma
 
 
 # --- Parallel signal + jackknife ----------------------------------------------
-def _signal_and_jk_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_stamp,
-                            bins_frac, mode, n_subsamples):
+def _signal_and_jk_parallel(executor, 
+                            l, b, redshifts, 
+                            r_voids, max_Rvoid,
+                            npix_stamp, bins_frac,
+                            mode, n_subsamples, n_workers=None):
     n_voids = len(l)
 
     if mode == 'errors':
@@ -103,8 +106,7 @@ def _signal_and_jk_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_
         labels = KMeans(n_clusters=n_subsamples, random_state=42, n_init=10).fit_predict(xyz)
         regions = [np.where(labels == k)[0] for k in range(n_subsamples)]
     else:
-        # Plain signal stack: split into n_workers-ish chunks for speed.
-        n_chunks = max(1, (executor._max_workers if hasattr(executor, '_max_workers') else 4))
+        n_chunks = max(1, n_workers)
         regions = [idx for idx in np.array_split(np.arange(n_voids), n_chunks) if len(idx) > 0]
 
     tasks = []
@@ -134,18 +136,16 @@ def _signal_and_jk_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_
                                                  max_Rvoid, bins_frac, silent=True)
             jk_profiles.append(prof)
         jk_profiles = np.array(jk_profiles)
-        delta = np.nan_to_num(jk_profiles - prof_total)
-        n = len(regions)
-        cov_matrix = (n - 1) / n * np.dot(delta.T, delta)
-        prof_err = np.sqrt(np.diag(cov_matrix))
+
+        cov_matrix, err = fm.sample_covariance(jk_profiles, kind='jk')
     else:
         jk_profiles, cov_matrix = None, None
-        prof_err = np.zeros_like(prof_total)
+        err = np.zeros_like(prof_total)
 
-    return signal_map, prof_total, r_frac, prof_err, jk_profiles, cov_matrix
+    return signal_map, prof_total, r_frac, err, jk_profiles, cov_matrix
 
 
-# --- Main entry point (parallel twin of fm.process_bin_stacking) --------------
+# --- Main entry point  --------------
 def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, data_sample_bin,
                                   coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map,
                                   common_mask, stacks_cache_folder, n_random_factor, n_rotations,
@@ -205,6 +205,8 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
                                                     n_random_factor, existing_rand)
                               if n_random_factor > 0 else np.array([]))
 
+        cov_cmb, err_cmb = fm.sample_covariance(null_profiles_rand, kind='cmb')
+
         if n_rotations > 0 or n_random_factor > 0:
             np.savez(null_cache_file, null_profiles_rot=null_profiles_rot, null_profiles_rand=null_profiles_rand)
 
@@ -221,18 +223,20 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
                 'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
                 'n_rotations_done': max(n_rotations, signal_data.get('n_rotations_done', 0)),
                 'n_randoms_done': max(n_random_factor, signal_data.get('n_randoms_done', 0)),
+                'cov_cmb': cov_cmb,
+                'err_cmb': err_cmb
             })
             with open(signal_cache_file, 'wb') as f:
                 pickle.dump(signal_data, f)
             return signal_data
 
         print('[parallel] Computing signal stack and errors...')
-        signal_map, prof_total, r_frac, prof_err, jk_profiles, cov_matrix = _signal_and_jk_parallel(
-            executor, l, b, redshifts_all, r_voids_all, max_Rvoid, npix_stamp, bins_frac, mode, n_subsamples)
+        signal_map, prof_total, r_frac, prof_err, jk_profiles, cov_jk = _signal_and_jk_parallel(
+            executor, l, b, redshifts_all, r_voids_all, max_Rvoid, npix_stamp, bins_frac, mode, n_subsamples, n_workers)
 
     final_result = {
         'z_mean': z_mean, 'map': signal_map, 'r_frac': r_frac, 'profile': prof_total,
-        'error': prof_err, 'jk_profiles': jk_profiles, 'cov_matrix': cov_matrix,
+        'error': prof_err, 'jk_profiles': jk_profiles, 'cov_jk': cov_jk, 'cov_cmb': cov_cmb,
         'null_rot_mean': null_rot_mean, 'null_rot_std': null_rot_std,
         'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
         'n_voids': n_voids, 'key': z_text, 'n_rotations_done': n_rotations, 'n_randoms_done': n_random_factor,

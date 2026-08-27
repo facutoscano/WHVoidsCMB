@@ -160,81 +160,25 @@ def radial_profile_weighted(sum_map, count_map, max_Rvoid, bins_frac, silent=Fal
         r_centers.append((bins_frac[i] + bins_frac[i+1]) / 2.)
     return np.array(profile), np.array(r_centers)
 
-
-def null_test_rotations(l, b, redshifts, r_voids, cmb_map, cmb_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_profiles=[]):
-    n_old = len(existing_profiles)
-    if n_rotations <= n_old:
-        return np.array(existing_profiles[:n_rotations])
-    
-    print(f'Performing {n_rotations - n_old} additional random rotations of the CMB map...')
-    null_profiles = list(existing_profiles)
-
-    np.random.seed(42+n_old)
-    angles = np.random.uniform(10, 350, n_rotations-n_old)
-
-    for ang in angles:
-        rot_cmb = rotate_map(cmb_map, rot_angles=[ang, 0, 0])
-        rot_mask = rotate_map(cmb_mask, rot_angles=[ang, 0, 0])
-        rot_effective_mask = rot_mask
-
-        stack_null, c = stacking_gnomonic(l, b, redshifts, r_voids, rot_cmb, rot_effective_mask, max_Rvoid, npix_stamp, range(len(l)), silent=True)
-        prof_null, _ = radial_profile_weighted(stack_null, c, max_Rvoid, bins_frac, silent=True)
-        null_profiles.append(prof_null)
-
-    null_profiles = np.array(null_profiles)
-    return null_profiles
-
-
-def null_test_randoms(nside, redshifts, r_voids, cmb_map, stamp_mask, position_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_profiles=[]):
-    n_old = len(existing_profiles)
-    if n_random_factor <= n_old:
-        return np.array(existing_profiles[:n_random_factor])
-    
-    print(f'Performing {n_random_factor-n_old} random positions per void...')
-    null_profiles = list(existing_profiles)
-    n_voids = len(redshifts)
-
-    for i in range(n_random_factor - n_old):
-        rand_l, rand_b = generate_random(position_mask, n_voids, nside)
-        rand_idx = np.random.permutation(n_voids)
-        stack_null, c = stacking_gnomonic(rand_l, rand_b, redshifts[rand_idx], r_voids[rand_idx], cmb_map, stamp_mask, max_Rvoid, npix_stamp, range(n_voids), silent=True)
-        prof_null, _ = radial_profile_weighted(stack_null, c, max_Rvoid, bins_frac, silent=True)
-        null_profiles.append(prof_null)
-
-    null_profiles = np.array(null_profiles)
-    return null_profiles
-
-
-def profiles_with_errors(indices, l, b, redshifts, r_voids, lensing_map, mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples=20):
-    ra_rad, dec_rad = np.radians(l[indices]), np.radians(b[indices])
-    coords_xyz = np.column_stack([np.cos(dec_rad)*np.cos(ra_rad), np.cos(dec_rad)*np.sin(ra_rad), np.sin(dec_rad)])
-    print(f'Dividing {len(indices)} voids into {n_subsamples} jackknife regions (KMeans)...')
-    labels = KMeans(n_clusters=n_subsamples, random_state=42, n_init=10).fit_predict(coords_xyz)
-
-    sums, counts = [], []
-    for k in range(n_subsamples):
-        in_region = (labels == k); idxs_k = indices[in_region]
-        if len(idxs_k) == 0:
-            sums.append(np.zeros((npix_stamp, npix_stamp))); counts.append(np.zeros((npix_stamp, npix_stamp))); continue
-        s_k, c_k = stacking_gnomonic(l[indices][in_region], b[indices][in_region],
-                                     redshifts[indices][in_region], r_voids[indices][in_region],
-                                     lensing_map, mask, max_Rvoid, npix_stamp, range(len(idxs_k)), silent=True)
-        sums.append(s_k); counts.append(c_k)
-
-    sums, counts = np.array(sums), np.array(counts)
-    SUM, COUNT = sums.sum(axis=0), counts.sum(axis=0)
-    best_prof, _ = radial_profile_weighted(SUM, COUNT, max_Rvoid, bins_frac, silent=True)
-
-    jk_profiles = []
-    for k in range(n_subsamples):     
-        prof, _ = radial_profile_weighted(SUM - sums[k], COUNT - counts[k], max_Rvoid, bins_frac, silent=True)
-        jk_profiles.append(prof)
-    jk_profiles = np.array(jk_profiles)
-
-    delta = np.nan_to_num(jk_profiles - best_prof)
-    cov_matrix = (n_subsamples - 1) / n_subsamples * np.dot(delta.T, delta)
-    return best_prof, np.sqrt(np.diag(cov_matrix)), jk_profiles, cov_matrix
-
+def sample_covariance(profiles, kind='jk'):
+    if len(profiles) < 2 or profiles.ndim != 2:
+        return None, None
+    else:
+        good = np.isfinite(profiles).all(axis=0)
+        p = profiles.shape[1]
+        C = np.full((p, p), np.nan)
+        if kind=='jk':
+            delta = profiles[:,good] - profiles[:,good].mean(axis=0)
+            n = profiles.shape[0]
+            cov_matrix = (n - 1) / n * np.dot(delta.T, delta)
+            C[np.ix_(good, good)] = cov_matrix
+        elif kind == 'cmb':
+            cov_matrix = np.cov(profiles[:,good], rowvar=False)
+            C[np.ix_(good, good)] = cov_matrix
+        else:
+            raise ValueError(f'Unknown kind: {kind}')
+        err = np.sqrt(np.diag(C))
+    return C, err
 
 def build_random_exclusion_mask(base_mask, l, b, redshifts, r_voids, excl_factor, nside, silent=False):
     """Return a copy of base_mask with angular disks of radius (excl_factor * Rv) around
@@ -255,104 +199,7 @@ def build_random_exclusion_mask(base_mask, l, b, redshifts, r_voids, excl_factor
         print(f'  random pool: {f_out/f_in*100:.1f}% of the base footprint remains after exclusion.')
     return excl
 
-
-def process_bin_stacking(release, mode, z_min, z_max, r_min, r_max, data_sample_bin, coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map, common_mask, stacks_cache_folder, n_random_factor, n_rotations, n_subsamples=20, delta_label='d23_all', filter_label='none', force_rerun=False, random_pool='full', random_excl_factor=1.0):
-    z_text = f'{z_min:.2f}_{z_max:.2f}'
-    r_text = f'{r_min:.1f}_{r_max:.1f}'
-    z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
-    l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
-    
-    print(f'Starting stacking for bin with z in [{z_min:.2f}, {z_max:.2f}] containing {n_voids} voids (mean z={z_mean:.3f})...')
-
-    # --- Random null pool ---------------------------------------------------
-    # 'full'    -> randoms drawn over the whole CMB-lensing footprint (common_mask)
-    # 'survey'  -> randoms restricted to the void survey footprint (legacy behaviour)
-    # An exclusion mask removes disks of (random_excl_factor * Rv) around real voids
-    # so the random null does not pick up real void signal.
-    if random_pool == 'survey':
-        random_base_mask = common_mask * footprint_mask(l, b, output_nside=nside)
-    else:
-        random_base_mask = common_mask
-    random_position_mask = build_random_exclusion_mask(
-        random_base_mask, l, b, redshifts_all, r_voids_all, random_excl_factor, nside)
-    rand_label = f'rpool{random_pool}_excl{(random_excl_factor or 0):.1f}'
-
-    n_rotations = n_rotations if n_rotations is not None else 0
-    n_random_factor = n_random_factor if n_random_factor is not None else 0
-
-    signal_cache_file = os.path.join(stacks_cache_folder, f'signal_cache_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}_{rand_label}.pkl')
-
-    if not force_rerun and os.path.exists(signal_cache_file):
-        with open(signal_cache_file, 'rb') as f:
-            cached_data = pickle.load(f)
-        
-        cached_nrot = cached_data.get('n_rotations_done', 0)
-        cached_nrand = cached_data.get('n_randoms_done', 0)
-
-        if cached_nrot >= n_rotations and cached_nrand >= n_random_factor:
-            print(f'Loading fully cached signal and null tests from {signal_cache_file}.')
-            return cached_data
-        else:
-            print(f'Signal found in cache, but more null tests requested. Updating...')
-            signal_data = cached_data
-    else:
-        signal_data = None
-
-    null_cache_file = os.path.join(stacks_cache_folder, f'null_tests_{release}_{z_text}_{r_text}_N{n_voids}_{delta_label}_{filter_label}_maxRv{max_Rvoid:.1f}_{rand_label}.npz')
-
-    existing_rot, existing_rand = [], []
-    if not force_rerun and os.path.exists(null_cache_file):
-        data_cache = np.load(null_cache_file)
-        if 'null_profiles_rot' in data_cache: existing_rot = list(data_cache['null_profiles_rot'])
-        if 'null_profiles_rand' in data_cache: existing_rand = list(data_cache['null_profiles_rand'])
-    
-    null_profiles_rot = null_test_rotations(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, bins_frac, n_rotations, existing_rot) if n_rotations > 0 else np.array([])
-    null_profiles_rand = null_test_randoms(nside, redshifts_all, r_voids_all, lensing_map, common_mask, random_position_mask, max_Rvoid, npix_stamp, bins_frac, n_random_factor, existing_rand) if n_random_factor > 0 else np.array([])
-
-    if n_rotations > 0 or n_random_factor > 0:
-        np.savez(null_cache_file, null_profiles_rot=null_profiles_rot, null_profiles_rand= null_profiles_rand)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', category=RuntimeWarning)
-        null_rot_mean = np.nanmean(null_profiles_rot, axis=0) if len(null_profiles_rot) > 0 else np.full(len(bins_frac) -1, np.nan)
-        null_rot_std = np.nanstd(null_profiles_rot, axis=0) if len(null_profiles_rot) > 0 else np.full(len(bins_frac) -1, np.nan)
-        null_rand_mean = np.nanmean(null_profiles_rand, axis=0) if len(null_profiles_rand) > 0 else np.full(len(bins_frac)-1, np.nan)
-        null_rand_std = np.nanstd(null_profiles_rand, axis=0) if len(null_profiles_rand) > 0 else np.full(len(bins_frac)-1, np.nan)
-
-    if signal_data is not None:
-        signal_data.update({
-            'null_rot_mean': null_rot_mean, 'null_rot_std': null_rot_std,
-            'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
-            'n_rotations_done': max(n_rotations, signal_data.get('n_rotations_done', 0)), 'n_randoms_done': max(n_random_factor, signal_data.get('n_randoms_done', 0))
-        })
-        with open(signal_cache_file, 'wb') as f: pickle.dump(signal_data, f)
-        return signal_data
-    
-    print('Computing signal stack and errors...')
-    SUM, COUNT = stacking_gnomonic(l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, range(n_voids))
-    signal_map = stack_mean_map(SUM, COUNT)
-    prof_total, r_frac = radial_profile_weighted(SUM, COUNT, max_Rvoid, bins_frac)
-
-    jk_profiles, cov_matrix = None, None
-    if mode == 'errors':
-        _, prof_err, jk_profiles, cov_matrix = profiles_with_errors(np.arange(n_voids), l, b, redshifts_all, r_voids_all, lensing_map, common_mask, max_Rvoid, npix_stamp, bins_frac, n_subsamples)
-    else:
-        prof_err = np.zeros_like(prof_total)
-
-    final_result = {
-        'z_mean': z_mean, 'map': signal_map, 'r_frac': r_frac, 'profile': prof_total, 
-        'error': prof_err, 'jk_profiles': jk_profiles, 'cov_matrix': cov_matrix,
-        'null_rot_mean': null_rot_mean, 'null_rot_std': null_rot_std,
-        'null_rand_mean': null_rand_mean, 'null_rand_std': null_rand_std,
-        'n_voids': n_voids, 'key': z_text, 'n_rotations_done': n_rotations, 'n_randoms_done': n_random_factor
-    }
-
-    with open(signal_cache_file, 'wb') as f:
-        pickle.dump(final_result, f)
-
-    return final_result
-
-def build_rvoid_summary(bin_results_list, merged_results_list=None, print_table=True):
+def build_rvoid_summary(bin_results, print_table=True):
     """Resumen por muestra del radio mediano de los voids apilados [Mpc/h].
 
     Devuelve una lista de dicts (uno por bin y por catálogo: 'single'/'concat' y
@@ -360,8 +207,7 @@ def build_rvoid_summary(bin_results_list, merged_results_list=None, print_table=
     y la imprime por pantalla. En las corridas multi-seed concatenadas se agrega
     además la media y la dispersión de las medianas de cada seed."""
     def _kind(res):
-        if res.get('is_merged', False): return 'merged'
-        return 'concat' if res.get('is_multi_seed', False) else 'single'
+        return res.get('catalog','single')
 
     def _entries(results):
         out = []
@@ -381,7 +227,7 @@ def build_rvoid_summary(bin_results_list, merged_results_list=None, print_table=
             out.append(entry)
         return out
 
-    summary = _entries(bin_results_list) + _entries(merged_results_list)
+    summary = _entries(bin_results)
     summary.sort(key=lambda e: (e['bin_id'], e['catalog']))
 
     if print_table:
@@ -531,14 +377,14 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     plt.close()
 
 
-def plot_jackknife_and_correlation(bin_results_list, output_path, max_Rvoid):
-    n_bins = len(bin_results_list)
+def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
+    n_bins = len(bin_results)
     fig, axes = plt.subplots(2, n_bins, figsize=(5.5 * n_bins, 9), gridspec_kw={'hspace': 0.35, 'wspace': 0.2})
     if n_bins == 1: axes = axes[:, np.newaxis]
 
-    for col, data in enumerate(bin_results_list):
-        r_frac, profile, error, cov = data['r_frac'], data['profile'], data['error'], data.get('cov_matrix')
-        label, z_mean, n_voids, is_ms = data.get('key', f"Bin {col+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('is_multi_seed', False)
+    for col, data in enumerate(bin_results):
+        r_frac, profile, error, cov = data['r_frac'], data['profile'], data['error'], data.get('cov_jk')
+        label, z_mean, n_voids, is_ms = data.get('key', f"Bin {col+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('catalog') == 'concat'
 
         ax_p = axes[0, col]
         ax_p.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
@@ -572,7 +418,7 @@ def plot_jackknife_and_correlation(bin_results_list, output_path, max_Rvoid):
 
 
 def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
-    ms_bins = [d for d in bin_results_list if d.get('is_multi_seed', False) and d.get('seed_results') is not None]
+    ms_bins = [d for d in bin_results_list if d.get('catalog') == 'concat' and d.get('seed_results') is not None]
     if len(ms_bins) == 0: return
 
     n_bins = len(ms_bins)

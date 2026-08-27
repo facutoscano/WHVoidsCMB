@@ -18,7 +18,7 @@ class DualLogger(object):
 config = {
     'main_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/',
     'data_folder': '/home/ftoscano/Doctorado/Data/',
-    'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
+    'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/New_Results/',
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
@@ -33,18 +33,18 @@ config = {
     # Multi-seed catalogue handling (only used when N_seeds is not None)
     'seed_mode': 'merge',                # 'concat' (legacy, duplicates) | 'merge' (DBSCAN single catalogue) | 'both'
     'merge_eps_mpch': 8.0,              # DBSCAN linking length [Mpc/h] for the merge
-    'merge_min_frac': 0.4,             # min fraction of seeds to keep a void (min_samples = merge_min_frac * N_seeds)
+    'merge_min_frac': 0.4,              # min fraction of seeds to keep a void (min_samples = merge_min_frac * N_seeds)
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); True -> use catalogue x,y,z_cart
     
-    'zmin': 0.1, 'zmax': 0.5,        # zmin = 0.051 zmax = 0.583 
+    'zmin': 0.1, 'zmax': 0.5,           # zmin = 0.051 zmax = 0.583 
     'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
-    'Rvoid_bin': 0.1,        
+    'Rvoid_bin': 0.14,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
-    'smooth_value_arcmin': 20.0,        # Just used if filter_mode is 'gaussian'
+    'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'
@@ -52,37 +52,21 @@ config = {
    
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
-    'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 15,                # Number of random positions for cosmic variance estimation, as a factor of the number of voids (e.g. 10 means 10 randoms per void)
+    'n_subsamples': 15,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
+    'n_rand_factor': 30,               # Number of realizations of random positions for cosmic variance estimation
     'n_rotations': 30,                  # Number of random rotations of the cmb map for cosmic variance estimation
     'random_pool': 'full',              # 'full'  -> randoms over the whole CMB-lensing footprint (common_mask)
                                         # 'survey'-> randoms restricted to the void survey footprint (legacy)
-    'random_excl_factor': None,          # Exclude disks of (random_excl_factor * Rv) around real voids from the random pool. 0/None disables.
+    'random_excl_factor': None,         # Exclude disks of (random_excl_factor * Rv) around real voids from the random pool
+                                        # 0/None disables.
 
-    # Execution backend
-    'exec_backend': 'parallel',         # 'serial'   -> uses S1_voids
-                                        # 'parallel' -> uses S1_voids_parallel (multi-core stacking)
-    'n_workers': 100,                  # Number of worker processes for 'parallel' (None = all CPU cores)
-
-    
-    # Fitting setup
-    #'rmin_fit_mpc': 0.5,  
-    #'rmax_fit_mpc': 10.0, 
-
-    # MCMC setup
-    #'mcmc_walkers': 32, 
-    #'mcmc_steps': 2000, 
-    #'mcmc_discard': 500,
+    'n_workers': 30,                   # Number of worker processes for 'parallel' 
+                                        # None = all CPU cores
+                                        # 1=serial mode
 
     # Step control
     'run_step_1': True,
-
-    # Not implemented yet for the analysis of the CMB, but the structure is left here
-    # for future implementation of the fit and MCMC steps.
-    # 'run_step_2': False,
-    # 'run_step_3': False,
-
-    'force_rerun': False
+    'force_rerun': True
 }
 
 #%% Auxiliary functions
@@ -101,9 +85,7 @@ def main():
     with open(os.path.join(lensing_out, "WHVoidsCMB_pipeline_config.json"), 'w') as f:
         json.dump(config, f, indent=4)
 
-    backend = config.get('exec_backend', 'serial')
-    step1_module = 'S1_voids_parallel' if backend == 'parallel' else 'S1_voids'
-    print(f"Execution backend: {backend} -> {step1_module}")
+    step1_module = 'S1_voids_parallel'
     s1_voids = importlib.import_module(step1_module)
 
     try:
@@ -111,18 +93,6 @@ def main():
         if config['run_step_1']:
             print('\n>>> STEP 1: STACKING (Lensing)')
             s1_voids.run_pipeline(config)
-
-        ''' 
-        # Not implemented yet for the analysis of the CMB, but the structure is left here for future implementation of the fit and MCMC steps.
-
-        if config['run_step_2']:
-            print('\n>>> STEP 2: FIT')
-            s2_voids.run_pipeline(config)
-
-        if config['run_step_3']:
-            print('\n>>> STEP 3: MCMC')
-            s3_voids.run_pipeline(config)
-        ''' 
 
         with open(os.path.join(lensing_out, "SUCCESS"), 'w') as f: f.write("Done.")
         print("\n=== FINISHED ===")
