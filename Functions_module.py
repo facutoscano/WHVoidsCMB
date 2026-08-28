@@ -386,11 +386,13 @@ def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
     for row, data in enumerate(bin_results):
         r_frac, profile, error, cov, cov_cmb = data['r_frac'], data['profile'], data['error'], data.get('cov_jk'), data.get('cov_cmb')
         label, z_mean, n_voids, is_ms = data.get('key', f"Bin {row+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('catalog') == 'concat'
-
+        error_cmb = np.sqrt(np.diag(cov_cmb))
+        
         ax_p = axes[row, 0]
         ax_p.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
         ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
-        ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3, fmt='o-', color='xkcd:steel blue', capsize=3, linewidth=1.8, label='Signal (JK err.)')
+        ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3, fmt='o-', color='xkcd:steel blue', capsize=3, linewidth=1.8, label='JK error')
+        ax_p.errorbar(r_frac + 0.05, profile * 1e3, yerr=error_cmb * 1e3, fmt='none', ecolor='xkcd:dark red', alpha=0.3, capsize=3, label='CMB error')
         ax_p.set_xlim(-0.05, max_Rvoid + 0.05)
         ax_p.set_xlabel(r'$r\,/\,R_v$')
         ax_p.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})")
