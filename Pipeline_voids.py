@@ -37,7 +37,7 @@ config = {
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); True -> use catalogue x,y,z_cart
     
     'zmin': 0.1, 'zmax': 0.5,           # zmin = 0.051 zmax = 0.583 
-    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
+    'rmin': 25.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
