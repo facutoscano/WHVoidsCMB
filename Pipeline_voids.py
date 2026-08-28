@@ -52,8 +52,8 @@ config = {
    
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
-    'n_subsamples': 15,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
-    'n_rand_factor': 30,               # Number of realizations of random positions for cosmic variance estimation
+    'n_subsamples': 60,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
+    'n_rand_factor': 300,               # Number of realizations of random positions for cosmic variance estimation
     'n_rotations': 30,                  # Number of random rotations of the cmb map for cosmic variance estimation
     'random_pool': 'full',              # 'full'  -> randoms over the whole CMB-lensing footprint (common_mask)
                                         # 'survey'-> randoms restricted to the void survey footprint (legacy)
@@ -66,7 +66,7 @@ config = {
 
     # Step control
     'run_step_1': True,
-    'force_rerun': False
+    'force_rerun': True
 }
 
 #%% Auxiliary functions
