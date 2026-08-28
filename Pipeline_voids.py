@@ -66,7 +66,7 @@ config = {
 
     # Step control
     'run_step_1': True,
-    'force_rerun': True
+    'force_rerun': False
 }
 
 #%% Auxiliary functions
