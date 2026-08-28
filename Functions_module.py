@@ -379,14 +379,14 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
 
 def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
     n_bins = len(bin_results)
-    fig, axes = plt.subplots(2, n_bins, figsize=(5.5 * n_bins, 9), gridspec_kw={'hspace': 0.35, 'wspace': 0.2})
+    fig, axes = plt.subplots(n_bins, 3, figsize=(16, 4.2* n_bins), gridspec_kw={'hspace': 0.35, 'wspace': 0.3})
     if n_bins == 1: axes = axes[:, np.newaxis]
 
-    for col, data in enumerate(bin_results):
-        r_frac, profile, error, cov = data['r_frac'], data['profile'], data['error'], data.get('cov_jk')
-        label, z_mean, n_voids, is_ms = data.get('key', f"Bin {col+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('catalog') == 'concat'
+    for row, data in enumerate(bin_results):
+        r_frac, profile, error, cov, cov_cmb = data['r_frac'], data['profile'], data['error'], data.get('cov_jk'), data.get('cov_cmb')
+        label, z_mean, n_voids, is_ms = data.get('key', f"Bin {row+1}"), data['z_mean'], data.get('n_voids', '?'), data.get('catalog') == 'concat'
 
-        ax_p = axes[0, col]
+        ax_p = axes[row, 0]
         ax_p.axhline(0, color='k', linestyle=':', alpha=0.5, linewidth=1)
         ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7, linewidth=1)
         ax_p.errorbar(r_frac, profile * 1e3, yerr=error * 1e3, fmt='o-', color='xkcd:steel blue', capsize=3, linewidth=1.8, label='Signal (JK err.)')
@@ -395,23 +395,35 @@ def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
         ax_p.set_title(f"Bin {label}  (z={z_mean:.3f}, N={n_voids})")
         ax_p.grid(True, alpha=0.25)
         ax_p.legend(loc='lower right', frameon=True, fontsize=9)
-        if col == 0: ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
+        if row == 0: ax_p.set_ylabel(r'$\kappa\;[10^{-3}]$')
         else: ax_p.tick_params(labelleft=False)
 
-        ax_c = axes[1, col]
-        if cov is not None:
-            std = np.sqrt(np.diag(cov))
-            with np.errstate(invalid='ignore'): corr = cov / np.outer(std, std)
+        def _plot_corr(ax, cov_mat, title, first_col):
+            if cov_mat is None:
+                ax.text(0.5, 0.5, 'No covariance data', ha='center', va='center',
+                        transform=ax.transAxes, fontsize=11, color='gray')
+                ax.set_axis_off()
+                return
+            std = np.sqrt(np.diag(cov_mat))
+            with np.errstate(invalid='ignore'):
+                corr = cov_mat / np.outer(std, std)
             corr = np.nan_to_num(corr)
-            im = ax_c.imshow(corr, origin='lower', cmap='RdBu_r', vmin=-1, vmax=1, extent=[r_frac[0], r_frac[-1], r_frac[0], r_frac[-1]], aspect='auto')
-            plt.colorbar(im, ax=ax_c, label='Correlation', fraction=0.046, pad=0.04)
-            ax_c.set_xlabel(r'$r\,/\,R_v$')
-            ax_c.set_title(f"{'Seed-to-seed corr.' if is_ms else 'JK correlation matrix'} — Bin {label}")
-            if col == 0: ax_c.set_ylabel(r'$r\,/\,R_v$')
-            else: ax_c.tick_params(labelleft=False)
-        else:
-            ax_c.text(0.5, 0.5, 'No covariance data', ha='center', va='center', transform=ax_c.transAxes, fontsize=11, color='gray')
-            ax_c.set_axis_off()
+            im = ax.imshow(corr, origin='lower', cmap='RdBu_r', vmin=-1, vmax=1,
+                           extent=[r_frac[0], r_frac[-1], r_frac[0], r_frac[-1]], aspect='auto')
+            plt.colorbar(im, ax=ax, label='Correlation', fraction=0.046, pad=0.04)
+            ax.set_xlabel(r'$r\,/\,R_v$')
+            ax.set_title(title)
+            if first_col: ax.set_ylabel(r'$r\,/\,R_v$')
+            else: ax.tick_params(labelleft=False)
+
+        jk_title = f"{'Seed-to-seed corr.' if is_ms else 'JK corr.'} — Bin {label}"
+        _plot_corr(axes[row, 1], cov, 
+                   jk_title,
+                   True)
+        _plot_corr(axes[row, 2], 
+                   cov_cmb, 
+                   f"CMB (randoms) corr. — Bin {label}",
+                   False)
 
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()

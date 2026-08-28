@@ -7,7 +7,7 @@ Configuration: Release=PR4 | Mode=errors | Binning=redshift | n_workers=30
 Output Run Folder: /home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/New_Results/lensing/WH_PR4_redshift_1bins_errors_0.1_0.5_35.0_70.0_maxRv2.5_0.0125Rvperpix_d23_all_wiener
 
 Reading PR4 CMB Convergence map...
-Wiener filter applied. W_ell range: W[10]=0.442, W[100]=0.393, W[500]=0.041, W[1000]=0.008
+Wiener filter applied. W_ell range: W[10]=0.471, W[100]=0.406, W[500]=0.042, W[1000]=0.008
 CMB map filtered with Wiener filter.
 
 Reading WH voids catalogue...
