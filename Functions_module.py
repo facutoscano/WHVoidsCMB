@@ -380,7 +380,8 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
 def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
     n_bins = len(bin_results)
     fig, axes = plt.subplots(n_bins, 3, figsize=(16, 4.2* n_bins), gridspec_kw={'hspace': 0.35, 'wspace': 0.3})
-    if n_bins == 1: axes = axes[:, np.newaxis]
+    if n_bins == 1: 
+        axes = axes[np.newaxis, :]
 
     for row, data in enumerate(bin_results):
         r_frac, profile, error, cov, cov_cmb = data['r_frac'], data['profile'], data['error'], data.get('cov_jk'), data.get('cov_cmb')
