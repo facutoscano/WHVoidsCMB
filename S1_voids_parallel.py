@@ -151,7 +151,7 @@ def run_pipeline(config):
 
     filter_mode = config.get('filter_mode', 'none')
     if filter_mode == 'wiener':
-        nlkk_file = f'{data_folder}CMB/Lensing/nlkk_PR3_MV.dat'
+        nlkk_file = f'{data_folder}CMB/Lensing/nlkk_PR4_MV.dat'
         cmb_alm_filtered, W_ell = fm.apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048)
         lensing_map = hp.alm2map(cmb_alm_filtered, nside=nside)
         print('CMB map filtered with Wiener filter.')
