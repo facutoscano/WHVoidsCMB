@@ -26,7 +26,7 @@ config = {
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': 0.001,                # If None = no filter.
+    'delta_value': -0.001,                # If None = no filter.
                                         # If it is positive only voids with delta_23 > delta_value are considered.
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
