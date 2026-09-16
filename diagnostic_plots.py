@@ -49,7 +49,7 @@ config = {
 
     # --- selección de datos (igual a Pipeline_voids) ---
     'release':       'PR4',        # 'PR3' o 'PR4'
-    'void_catalog':  'BOSS',       # 'WH' (l,b galácticas) o 'BOSS' (ra,dec -> l,b)
+    'void_catalog':  'WH',       # 'WH' (l,b galácticas) o 'BOSS' (ra,dec -> l,b)
     'N_seeds':       100,          # None -> catálogo único; si no, N semillas
     'delta_value':   None,        # None: sin corte | >0: delta_23 > v | <0: delta_23 < v
 
@@ -60,7 +60,7 @@ config = {
     'merge_use_catalog_xyz': False,
 
     'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 30.0, 'rmax': 70.0,    # Mpc/h
+    'rmin': 35.0, 'rmax': 70.0,    # Mpc/h
 
     # --- geometría / filtro (igual al pipeline) ---
     'max_Rvoid':          2.5,
