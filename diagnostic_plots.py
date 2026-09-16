@@ -51,10 +51,10 @@ config = {
     'release':       'PR4',        # 'PR3' o 'PR4'
     'void_catalog':  'BOSS',       # 'WH' (l,b galácticas) o 'BOSS' (ra,dec -> l,b)
     'N_seeds':       100,          # None -> catálogo único; si no, N semillas
-    'delta_value':   0.001,        # None: sin corte | >0: delta_23 > v | <0: delta_23 < v
+    'delta_value':   None,        # None: sin corte | >0: delta_23 > v | <0: delta_23 < v
 
     # --- manejo multi-seed (idéntico al pipeline) ---
-    'seed_mode':     'merge',      # 'concat' | 'merge' | 'both'
+    'seed_mode':     'both',      # 'concat' | 'merge' | 'both'
     'merge_eps_mpch':        8.0,
     'merge_min_frac':        0.4,
     'merge_use_catalog_xyz': False,
