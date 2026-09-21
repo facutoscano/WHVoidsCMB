@@ -22,7 +22,7 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'cmb_map': 'ACT',            # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
+    'cmb_map': 'PLANCK_CIB',            # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
                                         # 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
     'min_footprint_coverage': 0.9,      # conservar voids cuyo disco max_Rvoid*Rv este
                                         # >= 90% dentro de la mascara (0 = sin corte)
