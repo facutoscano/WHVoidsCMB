@@ -11,6 +11,7 @@ import pandas as pd
 import pickle
 from astropy import units as u
 from astropy.cosmology import Planck18
+from astropy.coordinates import SkyCoord
 from sklearn.cluster import KMeans
 import warnings
 
@@ -65,6 +66,36 @@ def footprint_mask(l, b, output_nside, footprint_nside=32):
     output_mask = hp.ud_grade(footprint_mask, nside_out=output_nside)
     output_mask[output_mask > 0] = 1.0
     return output_mask
+
+
+def to_map_frame(l_gal, b_gal, frame):
+    """(l,b) galacticas [deg] -> coordenadas en el frame nativo del mapa.
+    'galactic' -> igual; 'equatorial'/'icrs' -> (ra,dec). Los perfiles radiales
+    son invariantes ante rotacion, asi que solo importa apuntar al pixel correcto."""
+    if frame in ('galactic', 'gal'):
+        return np.asarray(l_gal, float), np.asarray(b_gal, float)
+    if frame in ('equatorial', 'icrs', 'celestial'):
+        c = SkyCoord(l=np.asarray(l_gal) * u.degree,
+                     b=np.asarray(b_gal) * u.degree, frame='galactic').icrs
+        return c.ra.degree, c.dec.degree
+    raise ValueError(f'frame desconocido: {frame}')
+
+
+def footprint_coverage(l_gal, b_gal, z, r_void, mask, nside, frame,
+                       max_Rvoid, cov_radius_frac=None):
+    """Fraccion de la mascara dentro del disco de radio (cov_radius_frac o
+    max_Rvoid)*Rv alrededor de cada void, evaluada EN EL FRAME DEL MAPA.
+    Devuelve un array de cobertura in [0,1], uno por void. Con mascara binaria,
+    cobertura = fraccion del disco dentro del footprint."""
+    lon, lat = to_map_frame(l_gal, b_gal, frame)
+    rad = max_Rvoid if cov_radius_frac is None else cov_radius_frac
+    cov = np.empty(len(lon))
+    for i in range(len(lon)):
+        theta_deg = get_angularsize_comoving(z[i], rad * r_void[i])
+        vec = hp.ang2vec(lon[i], lat[i], lonlat=True)
+        pix = hp.query_disc(nside, vec, np.radians(theta_deg))
+        cov[i] = mask[pix].mean() if len(pix) else 0.0
+    return cov
 
 
 def generate_random(mask, n_random, nside):

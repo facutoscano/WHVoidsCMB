@@ -22,11 +22,15 @@ config = {
 
     # Data selection
     'release': 'PR4',                   # 'PR3' or 'PR4'
-    'void_catalog': 'BOSS',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
+    'cmb_map': 'PLANCK_PR4',            # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
+                                        # 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
+    'min_footprint_coverage': 0.9,      # conservar voids cuyo disco max_Rvoid*Rv este
+                                        # >= 90% dentro de la mascara (0 = sin corte)
+    'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
-    'delta_value': 0.001,                # If None = no filter.
+    'delta_value': None,                # If None = no filter.
                                         # If it is positive only voids with delta_23 > delta_value are considered.
                                         # If it is negative, only voids with delta_23 < delta_value are considered
 
@@ -37,7 +41,7 @@ config = {
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); True -> use catalogue x,y,z_cart
     
     'zmin': 0.1, 'zmax': 0.5,           # zmin = 0.051 zmax = 0.583 
-    'rmin': 30.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
+    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h , rmin=35 rmax=62.7
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
@@ -60,13 +64,13 @@ config = {
     'random_excl_factor': None,         # Exclude disks of (random_excl_factor * Rv) around real voids from the random pool
                                         # 0/None disables.
 
-    'n_workers': 60,                   # Number of worker processes for 'parallel' 
+    'n_workers': 120,                   # Number of worker processes for 'parallel' 
                                         # None = all CPU cores
                                         # 1=serial mode
 
     # Step control
     'run_step_1': True,
-    'force_rerun': False
+    'force_rerun': True
 }
 
 #%% Auxiliary functions

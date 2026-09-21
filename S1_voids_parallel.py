@@ -33,6 +33,46 @@ def _catalog_spec(catalog, data_folder):
     }
 
 
+def _map_spec(config):
+    """Ruta del klm/mapa, mascara, nlkk, frame, nside nativo y modo de filtrado
+    por mapa de lensing. config['cmb_map'] in
+      {'PLANCK_PR4','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj','PLANCK_inhom','ACT'}.
+    Planck: klm en galacticas, nside 2048, Wiener con su propio nlkk. Variantes de
+    foreground bajo CMB/PLANCK/<sub>/. ACT: mapa YA Wiener-filtrado, ecuatoriales,
+    nside 512, sin nlkk, cielo cortado (full_sky=False)."""
+    d = config['data_folder'].rstrip('/')
+    release = config['release']
+    key = str(config.get('cmb_map', f'PLANCK_{release}')).upper()
+    planck = f'{d}/CMB/PLANCK'
+    act = f'{d}/CMB/ACT'
+    common_mask = f'{planck}/Lensing/Common_mask_PR4Lensing_2048.fits'
+
+    # subcarpeta de cada variante de foreground de Planck
+    variants = {'PLANCK_CIB': 'CIBdeproj', 'PLANCK_INHOM': 'Inhf',
+                'PLANCK_SZ': 'Sz', 'PLANCK_SZ_DEPROJ': 'Szdeproj'}
+
+    if key in (f'PLANCK_{release}', 'PLANCK', 'PLANCK_PR4', 'PLANCK_PR3'):
+        return {'label': f'PLANCK_{release}', 'kind': 'alm', 'frame': 'galactic',
+                'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                'klm':  f'{planck}/Lensing/KAPPA_{release}klm_MV.fits',
+                'mask': common_mask,
+                'nlkk': f'{planck}/Lensing/nlkk_{release}_MV.dat'}
+    if key in variants:
+        sub = variants[key]
+        return {'label': key, 'kind': 'alm', 'frame': 'galactic',
+                'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                'klm':  f'{planck}/{sub}/dat_klm_MV.fits',
+                'mask': f'{planck}/{sub}/mask.fits',
+                'nlkk': f'{planck}/{sub}/nlkk.dat'}
+    if key == 'ACT':
+        return {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
+                'nside': 512, 'full_sky': False, 'apply_wiener': False,
+                'klm':  f'{act}/kappa_act_dr6_baseline_ns512_WF.fits',
+                'mask': f'{act}/mask_act_dr6_baseline_ns512.fits',
+                'nlkk': None}
+    raise KeyError(f"cmb_map desconocido: '{key}'")
+
+
 def _ensure_galactic(df, cat):
     """Garantiza columnas galácticas 'l','b'. WH ya las tiene; BOSS se convierte
     desde (ra,dec) ICRS para que todo el stacking/merge downstream use galácticas
@@ -60,6 +100,19 @@ def run_pipeline(config):
     Rvoid_bin = config['Rvoid_bin']
     npix_stamp = config['npix_stamp']
 
+    # --- Spec del mapa (rutas/frame/nside) + cap de npix para no sobremuestrear ---
+    # El void mas compacto angularmente (z=zmax, Rv=rmin) fija la resolucion minima:
+    # npix tal que reso_arcmin >= tamano de pixel del mapa. Asi ningun void sobremuestrea.
+    mspec = _map_spec(config)
+    map_label = mspec['label']
+    pix_arcmin = hp.nside2resol(mspec['nside'], arcmin=True)
+    box_deg_min = fm.get_angularsize_comoving(zmax, 2 * max_Rvoid * rmin)
+    npix_cap = int(np.floor(box_deg_min * 60.0 / pix_arcmin))
+    if npix_cap < npix_stamp:
+        print(f'[npix] {map_label}: npix_stamp {npix_stamp} -> {npix_cap} '
+              f'(pixel {pix_arcmin:.2f} arcmin @ nside={mspec["nside"]}; sin sobremuestreo).')
+        npix_stamp = max(1, npix_cap)
+
     bins_frac = np.arange(0, max_Rvoid + Rvoid_bin, Rvoid_bin)
     reso_rv_per_pix = (2 * max_Rvoid) / npix_stamp
     smooth_value_deg = config.get('smooth_value_arcmin', 0.0) / 60.0
@@ -70,6 +123,10 @@ def run_pipeline(config):
     n_subsamples = config['n_subsamples']
     random_factor = config.get('n_rand_factor', 10)
     n_rotations = config.get('n_rotations', 10)
+    if not mspec['full_sky'] and n_rotations != 0:
+        print(f'[nulls] {map_label}: mapa de cielo cortado -> fuerzo n_rotations=0 '
+              f'(el null de rotacion saca los voids del footprint).')
+        n_rotations = 0
     random_pool = config.get('random_pool', 'full')
     random_excl_factor = config.get('random_excl_factor', 1.0)
     n_workers = config.get('n_workers', None)
@@ -99,27 +156,30 @@ def run_pipeline(config):
     else:
         delta_label = f"d23_lt{abs(delta_23_value):.2f}"
 
-    filter_label = config.get('filter_mode', 'none')
-    if filter_label == 'gaussian':
-        filter_label = f'gaussian_{smooth_value_deg:.1f}deg'
-    elif filter_label == 'wiener':
-        filter_label = 'wiener'
+    if mspec['kind'] == 'map':                 # ACT: mapa ya filtrado
+        filter_label = 'prefiltered'
     else:
-        filter_label = 'no_filter'
+        filter_label = config.get('filter_mode', 'none')
+        if filter_label == 'gaussian':
+            filter_label = f'gaussian_{smooth_value_deg:.1f}deg'
+        elif filter_label == 'wiener':
+            filter_label = 'wiener'
+        else:
+            filter_label = 'no_filter'
 
     base_suffix = (f'{release}_{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
                    f'{delta_label}_{filter_label}')
-    file_suffix = f'{cat_label}_{base_suffix}'
+    file_suffix = f'{cat_label}_{map_label}_{base_suffix}'
 
     run_folder = os.path.join(output_folder, file_suffix)
     legacy_folder = os.path.join(output_folder, base_suffix)   # corridas previas sin prefijo (solo WH)
 
     # Migración de corridas WH viejas (carpeta sin prefijo de catálogo): si existe y
     # no se fuerza el rerun, se renombra a WH_... y se saltea el análisis.
-    if (not force_rerun) and cat_label == 'WH' and os.path.isdir(legacy_folder) \
-            and not os.path.isdir(run_folder):
+    if (not force_rerun) and cat_label == 'WH' and map_label == f'PLANCK_{release}' \
+            and os.path.isdir(legacy_folder) and not os.path.isdir(run_folder):
         os.rename(legacy_folder, run_folder)
         print(f'[migrate] Carpeta legacy encontrada: renombrada\n'
               f'    {base_suffix}\n -> {file_suffix}\n'
@@ -131,7 +191,7 @@ def run_pipeline(config):
 
     # Caché separada por catálogo para que WH y BOSS no colisionen (los nombres de
     # cache dependen de z/r/N, no del catálogo).
-    stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks", cat_label)
+    stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks", cat_label, map_label)
     if not os.path.exists(stacks_cache_folder):
         os.makedirs(stacks_cache_folder)
 
@@ -141,26 +201,32 @@ def run_pipeline(config):
     print('')
 
     #%% CMB map and masks
-    print(f'Reading {release} CMB Convergence map...')
-    nside = 2048
-    klm_file = f'{data_folder}CMB/Lensing/KAPPA_{release}klm_MV.fits'
-    common_mask_file = f'{data_folder}CMB/Lensing/Common_mask_PR4Lensing_2048.fits'
-
-    cmb_alm = hp.fitsfunc.read_alm(klm_file, hdu=1, return_mmax=False)
-    common_mask = hp.read_map(common_mask_file)
-
+    print(f'Reading {map_label} CMB convergence map (frame={mspec["frame"]})...')
     filter_mode = config.get('filter_mode', 'none')
-    if filter_mode == 'wiener':
-        nlkk_file = f'{data_folder}CMB/Lensing/nlkk_PR4_MV.dat'
-        cmb_alm_filtered, W_ell = fm.apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048)
-        lensing_map = hp.alm2map(cmb_alm_filtered, nside=nside)
-        print('CMB map filtered with Wiener filter.')
-    elif filter_mode == 'gaussian' and smooth_value_deg > 0:
-        lensing_map = hp.smoothing(hp.alm2map(cmb_alm, nside=nside), fwhm=np.radians(smooth_value_deg))
-        print(f'CMB map smoothed with Gaussian kernel of FWHM={smooth_value_deg:.1f} deg.')
-    else:
-        lensing_map = hp.alm2map(cmb_alm, nside=nside)
-        print('CMB map without additional filtering applied.')
+
+    if mspec['kind'] == 'alm':
+        nside = mspec['nside']                          # Planck: 2048
+        cmb_alm = hp.fitsfunc.read_alm(mspec['klm'], hdu=1, return_mmax=False)
+        if mspec['apply_wiener'] and filter_mode == 'wiener':
+            cmb_alm_filtered, W_ell = fm.apply_wiener_filter(cmb_alm, mspec['nlkk'], lmax=nside)
+            lensing_map = hp.alm2map(cmb_alm_filtered, nside=nside)
+            print('CMB map filtered with Wiener filter.')
+        elif filter_mode == 'gaussian' and smooth_value_deg > 0:
+            lensing_map = hp.smoothing(hp.alm2map(cmb_alm, nside=nside), fwhm=np.radians(smooth_value_deg))
+            print(f'CMB map smoothed with Gaussian kernel of FWHM={smooth_value_deg:.1f} deg.')
+        else:
+            lensing_map = hp.alm2map(cmb_alm, nside=nside)
+            print('CMB map without additional filtering applied.')
+    else:                                               # ACT: mapa ya Wiener-filtrado
+        lensing_map = hp.read_map(mspec['klm'])
+        nside = hp.get_nside(lensing_map)               # 512 (maximo del mapa)
+        print(f'Prefiltered map read (nside={nside}); no extra filtering applied.')
+
+    common_mask = hp.read_map(mspec['mask'])
+    if hp.get_nside(common_mask) != nside:
+        print(f'[mask] ud_grade {hp.get_nside(common_mask)} -> {nside}')
+        common_mask = hp.ud_grade(common_mask, nside_out=nside)
+    common_mask = np.where(common_mask >= 0.9, 1.0, 0.0)   # footprint binario (umbral 0.9)
     print('')
 
     #%% Reading and selecting voids data
@@ -189,7 +255,14 @@ def run_pipeline(config):
 
             base_filter = (df_seed['z'] >= zmin) & (df_seed['z'] < zmax) & (df_seed['R_void'] >= rmin) & (df_seed['R_void'] <= rmax) & (df_seed['completeness'] > 1.9)
             filtered_data = df_seed[base_filter].copy()
-            final_data[seed] = apply_delta_23_filter(filtered_data, delta_23_value)
+            fd = apply_delta_23_filter(filtered_data, delta_23_value)
+            min_cov = config.get('min_footprint_coverage', 0.0)
+            if min_cov and min_cov > 0 and len(fd):
+                cov = fm.footprint_coverage(fd['l'].values, fd['b'].values, fd['z'].values,
+                                            fd['R_void'].values, common_mask, nside,
+                                            mspec['frame'], max_Rvoid)
+                fd = fd[cov >= min_cov].copy()
+            final_data[seed] = fd
         print('All voids data loaded.\n')
     else:
         col_names = ['R_void', cat['lon_col'], cat['lat_col'], 'z']
@@ -199,6 +272,14 @@ def run_pipeline(config):
             (voids_data_raw['z'] >= zmin) & (voids_data_raw['z'] < zmax) &
             (voids_data_raw['R_void'] >= rmin) & (voids_data_raw['R_void'] <= rmax)
         ].copy()
+        min_cov = config.get('min_footprint_coverage', 0.0)
+        if min_cov and min_cov > 0:
+            n0 = len(final_data)
+            cov = fm.footprint_coverage(final_data['l'].values, final_data['b'].values,
+                                        final_data['z'].values, final_data['R_void'].values,
+                                        common_mask, nside, mspec['frame'], max_Rvoid)
+            final_data = final_data[cov >= min_cov].copy()
+            print(f'[footprint] {map_label}: {len(final_data)}/{n0} voids con cobertura>={min_cov}.')
         print(f'Total voids: {len(final_data)}')
         print('Voids data loaded.\n')
 
@@ -235,6 +316,12 @@ def run_pipeline(config):
             merged_df, _ = vsm.merge_seeds(concat_all, eps_mpch=merge_eps_mpch,
                                            min_frac=merge_min_frac, n_seeds=n_seeds,
                                            use_catalog_xyz=merge_use_xyz)
+            min_cov = config.get('min_footprint_coverage', 0.0)
+            if min_cov and min_cov > 0 and len(merged_df):
+                mcov = fm.footprint_coverage(merged_df['l'].values, merged_df['b'].values,
+                                             merged_df['z'].values, merged_df['R_void'].values,
+                                             common_mask, nside, mspec['frame'], max_Rvoid)
+                merged_df = merged_df[mcov >= min_cov].copy()
             edge_src = merged_df
         else:
             merged_df = None
@@ -259,7 +346,7 @@ def run_pipeline(config):
                 seed_subsets[s] = {
                     'data': sub,
                     'z_range': (sub['z'].min(), sub['z'].max()) if len(sub) else (np.nan, np.nan),
-                    'coords': (sub['l'].values, sub['b'].values) if len(sub) else None,
+                    'coords': fm.to_map_frame(sub['l'].values, sub['b'].values, mspec['frame']) if len(sub) else None,
                 }
             entry = {'id': int(i), 'seed_subsets': seed_subsets,
                      'count_mean': float(np.mean(counts))}
@@ -268,7 +355,7 @@ def run_pipeline(config):
                 entry['merged'] = {
                     'data': msub,
                     'z_range': (msub['z'].min(), msub['z'].max()) if len(msub) else (np.nan, np.nan),
-                    'coords': (msub['l'].values, msub['b'].values) if len(msub) else None,
+                    'coords': fm.to_map_frame(msub['l'].values, msub['b'].values, mspec['frame']) if len(msub) else None,
                 }
                 print(f'Bin {i+1}: concat mean N={entry["count_mean"]:.1f} | merged N={len(msub)}')
             else:
@@ -288,7 +375,7 @@ def run_pipeline(config):
         for info in bins_info_list:
             data_bin = info['data']
             gal_coords = info['coords']
-            coords_bin = (gal_coords.l.degree, gal_coords.b.degree)
+            coords_bin = fm.to_map_frame(gal_coords.l.degree, gal_coords.b.degree, mspec['frame'])
             z_bin_min, z_bin_max = info['z_range']
 
             result = pm.process_bin_stacking_parallel(
@@ -359,7 +446,7 @@ def run_pipeline(config):
                 if nonempty:
                     all_data_bin = pd.concat([entry['seed_subsets'][s]['data'] for s in nonempty],
                                              ignore_index=True)
-                    coords_combined = (all_data_bin['l'].values, all_data_bin['b'].values)
+                    coords_combined = fm.to_map_frame(all_data_bin['l'].values, all_data_bin['b'].values, mspec['frame'])
                     z_min_combined = np.nanmin([entry['seed_subsets'][s]['z_range'][0] for s in nonempty])
                     z_max_combined = np.nanmax([entry['seed_subsets'][s]['z_range'][1] for s in nonempty])
 
