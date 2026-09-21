@@ -61,9 +61,9 @@ def _map_spec(config):
         sub = variants[key]
         return {'label': key, 'kind': 'alm', 'frame': 'galactic',
                 'nside': 2048, 'full_sky': True, 'apply_wiener': True,
-                'klm':  f'{planck}/{sub}/dat_klm_MV.fits',
-                'mask': f'{planck}/{sub}/mask.fits',
-                'nlkk': f'{planck}/{sub}/nlkk.dat'}
+                'klm':  f'{planck}/Lensing/{sub}/dat_klm_MV.fits',
+                'mask': f'{planck}/Lensing/{sub}/mask.fits',
+                'nlkk': f'{planck}/Lensing/{sub}/nlkk.dat'}
     if key == 'ACT':
         return {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
                 'nside': 512, 'full_sky': False, 'apply_wiener': False,
