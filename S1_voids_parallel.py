@@ -44,7 +44,7 @@ def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
 
     Planck: klm in galactic coordinates, native nside 2048, Wiener with its own nlkk 
     (CIB uses PR3 nlkk)
-    ACT: klm in equatorials, native nside 512, already Wiener filterd
+    ACT: klm in equatorials, native nside 512, already Wiener filtered
     """
     d = data_folder.rstrip('/')
     key = str(cmb_map).upper()
@@ -646,6 +646,21 @@ def _run_act_vs_pr4(config):
 
     cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
     out = os.path.join(config['output_folder'], 'lensing')
+    dp, da = collected[pr4_label], collected['ACT']
+    if all(k in dp for k in ('void_l', 'void_b')) and all(k in da for k in ('void_l', 'void_b')):
+        tol = 1e-4 
+        setp = set(zip(np.round(np.asarray(dp['void_l']) / tol).astype(np.int64),
+                       np.round(np.asarray(dp['void_b']) / tol).astype(np.int64)))
+        seta = set(zip(np.round(np.asarray(da['void_l']) / tol).astype(np.int64),
+                       np.round(np.asarray(da['void_b']) / tol).astype(np.int64)))
+        ncommon = len(setp & seta)
+        print(f"[act-pr4] Selection -> PR4(ACT footprint) N={len(setp)}, ACT N={len(seta)}, "
+              f"commons={ncommon}, only-PR4={len(setp - seta)}, only-ACT={len(seta - setp)}")
+        if len(setp) == len(seta) == ncommon:
+            print("[act-pr4] OK: Same voids")
+        else:
+            print("[act-pr4] (!): the samples are different")
+
     fname = (f"ACTvsPR4_{cat_label}_{config['binning_mode']}_{config['n_bins']}bins_"
              f"{config['zmin']}_{config['zmax']}_{config['rmin']}_{config['rmax']}.pdf")
     cmp_path = os.path.join(out, fname)

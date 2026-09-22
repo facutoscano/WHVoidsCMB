@@ -643,12 +643,22 @@ def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_labe
         try:
             hp.mollview(footprint_mask, coord=[footprint_coord, 'G'], hold=True,
                         cbar=False, cmap='Greys', min=0, max=1,
-                        title='ACT footprint + voids')
+                        title='ACT footprint (galactic) + voids')
             hp.graticule(dpar=30, dmer=30, alpha=0.3)
-            vl = ds.get('void_l'); vb = ds.get('void_b')
-            if vl is not None and vb is not None:
-                hp.projscatter(np.asarray(vl), np.asarray(vb), lonlat=True,
-                               s=4, color='red', alpha=0.6)
+            vla, vba = do.get('void_l'), do.get('void_b')      # ACT
+            vlp, vbp = ds.get('void_l'), ds.get('void_b')      # PR4 (ACT footprint)
+            if vla is not None and vba is not None:
+                hp.projscatter(np.asarray(vla), np.asarray(vba), lonlat=True,
+                               s=10, color='red', alpha=0.7, zorder=3)
+            if vlp is not None and vbp is not None:
+                hp.projscatter(np.asarray(vlp), np.asarray(vbp), lonlat=True,
+                               s=32, facecolors='none', edgecolors='blue',
+                               linewidths=0.7, alpha=0.9, zorder=4)
+            na = 0 if vla is None else len(np.asarray(vla))
+            npr = 0 if vlp is None else len(np.asarray(vlp))
+            ax_m.text(0.5, -0.02,
+                      f'ACT (red, N={na})   vs   {success_label} (blue rings, N={npr})',
+                      ha='center', va='top', transform=ax_m.transAxes, fontsize=9)
         except Exception as e:
             ax_m.text(0.5, 0.5, f'mollview failed:\n{e}', ha='center', va='center',
                       transform=ax_m.transAxes, fontsize=9)
