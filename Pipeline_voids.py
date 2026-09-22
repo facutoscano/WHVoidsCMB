@@ -24,7 +24,7 @@ config = {
     'release': 'PR4',                   # 'PR3' or 'PR4'
     'cmb_map': 'ACT',                   # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
                                         # 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
-    'min_footprint_coverage': 0.6,      # conservar voids cuyo disco max_Rvoid*Rv este
+    'min_footprint_coverage': 0,      # conservar voids cuyo disco max_Rvoid*Rv este
                                         # >= 90% dentro de la mascara (0 = sin corte)
     'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
