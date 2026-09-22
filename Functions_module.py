@@ -603,3 +603,100 @@ def plot_map_comparison(collected, output_path, max_Rvoid,
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
     print(f"Map-comparison panel saved to {output_path}")
+
+
+def _net_and_err(d):
+    """Perfil neto (kappa - null_rand_mean) y su error combinado (JK + error del
+    null). Convencion identica a plot_stacked_maps_and_profiles."""
+    prof, err = np.asarray(d['profile']), np.asarray(d['error'])
+    nrm, nrs = d.get('null_rand_mean'), d.get('null_rand_std')
+    nr = d.get('n_randoms_done', 0) or 0
+    if nrm is not None and not np.all(np.isnan(nrm)):
+        net = prof - np.asarray(nrm)
+        nerr = np.sqrt(err ** 2 + (np.asarray(nrs) / np.sqrt(nr)) ** 2) if nr > 0 else err
+        band = np.asarray(nrs)
+    else:
+        net, nerr, band = prof, err, None
+    return net, nerr, band
+
+
+def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_label,
+                    footprint_mask=None, footprint_coord='C'):
+    """Panel para act-pr4:
+      - izq. arriba: perfil neto de PR4 (negro, barras + banda cosmic var) y de ACT
+        (color, barras).
+      - izq. abajo: significancia de la diferencia (PR4-ACT)/sqrt(sig_pr4^2+sig_act^2).
+        OJO: PR4 y ACT son los MISMOS voids -> estan muy correlacionados; esta sigma
+        (suma en cuadratura, i.e. independientes) SOBRESTIMA el error de la diferencia
+        -> es una cota conservadora. El test exacto necesita un jackknife conjunto.
+      - der.: footprint (mostrado en galacticas) + voids usados.
+    """
+    if success_label not in collected or other_label not in collected:
+        print("[act-pr4] faltan curvas para el panel.")
+        return
+    ds, do = collected[success_label], collected[other_label]
+    r = np.asarray(ds['r_frac'])
+    net_s, err_s, band_s = _net_and_err(ds)
+    net_o, err_o, _ = _net_and_err(do)
+
+    fig = plt.figure(figsize=(15, 7))
+    gs = gridspec.GridSpec(2, 2, width_ratios=[1.05, 1.35], height_ratios=[3, 1],
+                           hspace=0.06, wspace=0.22)
+    ax_p = fig.add_subplot(gs[0, 0])
+    ax_s = fig.add_subplot(gs[1, 0], sharex=ax_p)
+
+    # --- perfiles ---
+    ax_p.axhline(0, color='k', linestyle=':', alpha=0.6)
+    ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7)
+    if band_s is not None:
+        ax_p.fill_between(r, -band_s * 1e3, band_s * 1e3, color='xkcd:grey',
+                          alpha=0.30, zorder=1, label=r'PR4 $1\sigma$ cosmic var.')
+    ax_p.errorbar(r, net_o * 1e3, yerr=err_o * 1e3, fmt='s-', color='xkcd:teal',
+                  capsize=3, linewidth=1.7, zorder=4,
+                  label=f"{other_label} (N={do.get('n_voids','?')})")
+    ax_p.errorbar(r, net_s * 1e3, yerr=err_s * 1e3, fmt='o-', color='k',
+                  capsize=3, linewidth=2.0, zorder=5,
+                  label=f"{success_label} (N={ds.get('n_voids','?')})")
+    ax_p.set_ylabel(r'$\kappa_{\rm net}\;[10^{-3}]$')
+    ax_p.grid(True, alpha=0.25)
+    ax_p.legend(loc='lower right', frameon=True, fontsize=9)
+    ax_p.tick_params(labelbottom=False)
+
+    # --- significancia de la diferencia ---
+    denom = np.sqrt(err_s ** 2 + err_o ** 2)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sig = (net_s - net_o) / denom
+    ax_s.axhline(0, color='k', alpha=0.5)
+    for y in (-2, 2):
+        ax_s.axhline(y, color='gray', linestyle='--', alpha=0.7)
+    ax_s.axhspan(-2, 2, color='gray', alpha=0.10, zorder=0)
+    ax_s.axvline(1.0, color='gray', linestyle='--', alpha=0.7)
+    ax_s.plot(r, sig, 'o-', color='xkcd:crimson', markersize=4, linewidth=1.4)
+    ax_s.set_ylim(-5, 5)
+    ax_s.set_xlim(-0.1, max_Rvoid + 0.1)
+    ax_s.set_xlabel(r'$r\,/\,R_v$')
+    ax_s.set_ylabel(r'$\dfrac{\kappa_{\rm PR4}-\kappa_{\rm ACT}}{\sqrt{\sigma_{\rm PR4}^2+\sigma_{\rm ACT}^2}}$')
+    ax_s.grid(True, alpha=0.25)
+
+    # --- footprint (galacticas) + voids ---
+    ax_m = fig.add_subplot(gs[:, 1])
+    if footprint_mask is not None:
+        plt.sca(ax_m)
+        try:
+            hp.mollview(footprint_mask, coord=[footprint_coord, 'G'], hold=True,
+                        cbar=False, cmap='Greys', min=0, max=1,
+                        title='Footprint (galactic) + voids usados')
+            hp.graticule(dpar=30, dmer=30, alpha=0.3)
+            vl = ds.get('void_l'); vb = ds.get('void_b')
+            if vl is not None and vb is not None:
+                hp.projscatter(np.asarray(vl), np.asarray(vb), lonlat=True,
+                               s=4, color='red', alpha=0.6)
+        except Exception as e:
+            ax_m.text(0.5, 0.5, f'mollview fallo:\n{e}', ha='center', va='center',
+                      transform=ax_m.transAxes, fontsize=9)
+    else:
+        ax_m.set_axis_off()
+
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"ACT-vs-PR4 panel saved to {output_path}")

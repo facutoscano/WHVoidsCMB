@@ -293,6 +293,7 @@ def _run_single_map(config):
     #%% Reading and selecting voids data
     print(f'Reading {cat_label} voids catalogue...')
     n_seeds = config.get('N_seeds', None)
+    sample_lb_gal = None      # coords galacticas de la muestra final (para el panel de footprint)
 
     def apply_delta_23_filter(df, delta_value):
         if delta_value is None:
@@ -341,6 +342,7 @@ def _run_single_map(config):
                                         cov_mask, cov_nside, cov_frame, max_Rvoid)
             final_data = final_data[cov >= min_cov].copy()
             print(f'[footprint] {map_label}: {len(final_data)}/{n0} voids con cobertura>={min_cov}.')
+        sample_lb_gal = (final_data['l'].values, final_data['b'].values)
         print(f'Total voids: {len(final_data)}')
         print('Voids data loaded.\n')
 
@@ -384,9 +386,12 @@ def _run_single_map(config):
                                              cov_mask, cov_nside, cov_frame, max_Rvoid)
                 merged_df = merged_df[mcov >= min_cov].copy()
             edge_src = merged_df
+            sample_lb_gal = (merged_df['l'].values, merged_df['b'].values)
         else:
             merged_df = None
             edge_src = concat_all
+            if sample_lb_gal is None and len(final_data.get(0, [])):
+                sample_lb_gal = (final_data[0]['l'].values, final_data[0]['b'].values)
 
         _, bin_edges = pd.qcut(edge_src[metric_col], n_bins_quantile,
                              retbins=True, labels=False, duplicates='drop')
@@ -598,20 +603,27 @@ def _run_single_map(config):
                      f)
         print(f"Data saved in: {data_save_path}")
 
-    return _primary_result(all_results, map_label)
+    return _primary_result(all_results, map_label, sample_lb_gal)
 
 
-def _primary_result(all_results, map_label):
+def _primary_result(all_results, map_label, sample_lb_gal=None):
     """Resultado representativo (bin 0) de una corrida, para el panel comparativo.
-    Prioridad de catalogo: merged > concat > single."""
+    Prioridad de catalogo: merged > concat > single. Adjunta las coords galacticas
+    de la muestra (para dibujar el footprint + voids)."""
     if not all_results:
         return None
+    out = None
     for cat in ('merged', 'concat', 'single'):
         for r in all_results:
             if r.get('catalog') == cat and int(r.get('bin_id', 0)) == 0:
-                out = dict(r); out['map_label'] = map_label
-                return out
-    out = dict(all_results[0]); out['map_label'] = map_label
+                out = dict(r); break
+        if out is not None:
+            break
+    if out is None:
+        out = dict(all_results[0])
+    out['map_label'] = map_label
+    if sample_lb_gal is not None:
+        out['void_l'], out['void_b'] = sample_lb_gal
     return out
 
 
@@ -660,8 +672,24 @@ def _run_act_vs_pr4(config):
     except FileNotFoundError as e:
         print(f"[act-pr4] ACT salteado (archivo faltante): {e}")
 
-    _save_comparison_panel(collected, config, tag='ACTvsPR4',
-                           success_label=pr4_label, order=[pr4_label, 'ACT'])
+    if len(collected) < 2:
+        print("[act-pr4] falta PR4 o ACT; no genero panel.")
+        return
+
+    # mascara de ACT (ecuatorial) para el panel de footprint (se muestra en galacticas)
+    data_folder = config['data_folder']
+    act_mask = hp.read_map(_map_spec('ACT', data_folder)['mask'])
+    act_mask = np.where(act_mask >= 0.9, 1.0, 0.0)
+
+    cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
+    out = os.path.join(config['output_folder'], 'lensing')
+    fname = (f"ACTvsPR4_{cat_label}_{config['binning_mode']}_{config['n_bins']}bins_"
+             f"{config['zmin']}_{config['zmax']}_{config['rmin']}_{config['rmax']}.pdf")
+    cmp_path = os.path.join(out, fname)
+    fm.plot_act_vs_pr4(collected, cmp_path, config['max_Rvoid'],
+                       success_label=pr4_label, other_label='ACT',
+                       footprint_mask=act_mask, footprint_coord='C')
+    print(f"\n[act-pr4] panel guardado: {cmp_path}")
 
 
 def run_pipeline(config):
