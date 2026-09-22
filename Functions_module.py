@@ -546,3 +546,60 @@ def plot_merge_vs_concat(pair_list, output_path, max_Rvoid):
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
     print(f"Merge-vs-concat comparison plot saved to {output_path}")
+
+
+def plot_map_comparison(collected, output_path, max_Rvoid,
+                        success_label='PLANCK_PR4', order=None):
+    """Panel unico con el perfil NETO (kappa - null_rand_mean) de varios mapas.
+      - success_label (PR4): con barras de error (JK + error del null) y banda de
+        1sigma de cosmic variance (+/- null_rand_std).
+      - los demas: linea de color, sin barras.
+    collected: {map_label: result_dict} (cada uno con r_frac, profile, error,
+    null_rand_mean, null_rand_std, n_randoms_done, n_voids)."""
+    labels = [l for l in (order or list(collected.keys())) if l in collected]
+    if not labels:
+        print("[compare] nada para plotear.")
+        return
+
+    def _net(d):
+        prof, err = np.asarray(d['profile']), np.asarray(d['error'])
+        nrm, nrs = d.get('null_rand_mean'), d.get('null_rand_std')
+        nr = d.get('n_randoms_done', 0) or 0
+        if nrm is not None and not np.all(np.isnan(nrm)):
+            net = prof - np.asarray(nrm)
+            nerr = np.sqrt(err ** 2 + (np.asarray(nrs) / np.sqrt(nr)) ** 2) if nr > 0 else err
+            band = np.asarray(nrs)
+        else:
+            net, nerr, band = prof, err, None
+        return net, nerr, band
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.axhline(0, color='k', linestyle=':', alpha=0.6, zorder=2)
+    ax.axvline(1.0, color='gray', linestyle='--', alpha=0.7, zorder=2)
+
+    others = [l for l in labels if l != success_label]
+    colors = cm.viridis(np.linspace(0.05, 0.9, max(len(others), 1)))
+    for lab, col in zip(others, colors):
+        d = collected[lab]
+        net, _, _ = _net(d)
+        ax.plot(d['r_frac'], net * 1e3, '-', color=col, linewidth=1.7, alpha=0.9,
+                zorder=3, label=f"{lab} (N={d.get('n_voids', '?')})")
+
+    if success_label in collected:
+        d = collected[success_label]
+        net, nerr, band = _net(d)
+        if band is not None:
+            ax.fill_between(d['r_frac'], -band * 1e3, band * 1e3, color='xkcd:grey',
+                            alpha=0.35, zorder=1, label=r'PR4 $1\sigma$ cosmic var.')
+        ax.errorbar(d['r_frac'], net * 1e3, yerr=nerr * 1e3, fmt='o-', color='k',
+                    capsize=3, linewidth=2.0, zorder=5,
+                    label=f"{success_label} (N={d.get('n_voids', '?')})")
+
+    ax.set_xlim(-0.1, max_Rvoid + 0.1)
+    ax.set_xlabel(r'$r\,/\,R_v$')
+    ax.set_ylabel(r'$\kappa_{\rm net}\;[10^{-3}]$')
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc='lower right', frameon=True, fontsize=9)
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"Map-comparison panel saved to {output_path}")

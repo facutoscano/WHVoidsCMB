@@ -21,10 +21,12 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/New_Results/',
 
     # Data selection
-    'release': 'PR4',                   # 'PR3' or 'PR4'
-    'cmb_map': 'ACT',                   # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
-                                        # 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
-    'min_footprint_coverage': 0,      # conservar voids cuyo disco max_Rvoid*Rv este
+    'cmb_map': 'All_Planck',                   # un mapa: 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
+                                        #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
+                                        # grupos (panel comparativo, exito=PR4):
+                                        #   'All_Planck' (PR3,PR4,CIB,inhom,Sz,Szdeproj)
+                                        #   'All' (lo anterior + ACT)
+    'min_footprint_coverage': 0.9,      # conservar voids cuyo disco max_Rvoid*Rv este
                                         # >= 90% dentro de la mascara (0 = sin corte)
     'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
@@ -45,7 +47,7 @@ config = {
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
-    'Rvoid_bin': 0.25,        
+    'Rvoid_bin': 0.14,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'

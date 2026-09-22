@@ -33,44 +33,73 @@ def _catalog_spec(catalog, data_folder):
     }
 
 
-def _map_spec(config):
+# Grupos multi-mapa (se corren en un loop y se plotean en un panel comun).
+# El caso de exito de referencia es PLANCK_PR4 (con error y cosmic variance).
+MAP_GROUPS = {
+    'ALL_PLANCK': ['PLANCK_PR4', 'PLANCK_PR3', 'PLANCK_CIB',
+                   'PLANCK_inhom', 'PLANCK_SZ', 'PLANCK_SZ_deproj'],
+    'ALL':        ['PLANCK_PR4', 'PLANCK_PR3', 'PLANCK_CIB',
+                   'PLANCK_inhom', 'PLANCK_SZ', 'PLANCK_SZ_deproj', 'ACT'],
+}
+
+
+def _map_spec(cmb_map, data_folder):
     """Ruta del klm/mapa, mascara, nlkk, frame, nside nativo y modo de filtrado
-    por mapa de lensing. config['cmb_map'] in
-      {'PLANCK_PR4','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj','PLANCK_inhom','ACT'}.
-    Planck: klm en galacticas, nside 2048, Wiener con su propio nlkk. Variantes de
-    foreground bajo CMB/PLANCK/<sub>/. ACT: mapa YA Wiener-filtrado, ecuatoriales,
-    nside 512, sin nlkk, cielo cortado (full_sky=False)."""
-    d = config['data_folder'].rstrip('/')
-    release = config['release']
-    key = str(config.get('cmb_map', f'PLANCK_{release}')).upper()
-    planck = f'{d}/CMB/PLANCK'
+    por mapa de lensing. cmb_map in
+      {'PLANCK_PR4','PLANCK_PR3','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj',
+       'PLANCK_inhom','ACT'}.
+    Planck: klm en galacticas, nside 2048, Wiener con su propio nlkk (CIB usa el de
+    PR3, que no trae nlkk propio). Todo bajo CMB/PLANCK/Lensing/. ACT: mapa YA
+    Wiener-filtrado, ecuatoriales, nside 512, sin nlkk, cielo cortado."""
+    d = data_folder.rstrip('/')
+    key = str(cmb_map).upper()
+    L = f'{d}/CMB/PLANCK/Lensing'
     act = f'{d}/CMB/ACT'
-    common_mask = f'{planck}/Lensing/Common_mask_PR4Lensing_2048.fits'
+    nlkk_pr3 = f'{L}/nlkk_PR3_MV.dat'
 
-    # subcarpeta de cada variante de foreground de Planck
-    variants = {'PLANCK_CIB': 'CIBdeproj', 'PLANCK_INHOM': 'Inhf',
-                'PLANCK_SZ': 'Sz', 'PLANCK_SZ_DEPROJ': 'Szdeproj'}
-
-    if key in (f'PLANCK_{release}', 'PLANCK', 'PLANCK_PR4', 'PLANCK_PR3'):
-        return {'label': f'PLANCK_{release}', 'kind': 'alm', 'frame': 'galactic',
-                'nside': 2048, 'full_sky': True, 'apply_wiener': True,
-                'klm':  f'{planck}/Lensing/KAPPA_{release}klm_MV.fits',
-                'mask': common_mask,
-                'nlkk': f'{planck}/Lensing/nlkk_{release}_MV.dat'}
-    if key in variants:
-        sub = variants[key]
-        return {'label': key, 'kind': 'alm', 'frame': 'galactic',
-                'nside': 2048, 'full_sky': True, 'apply_wiener': True,
-                'klm':  f'{planck}/Lensing/{sub}/dat_klm_MV.fits',
-                'mask': f'{planck}/Lensing/{sub}/mask.fits',
-                'nlkk': f'{planck}/Lensing/{sub}/nlkk.dat'}
-    if key == 'ACT':
-        return {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
-                'nside': 512, 'full_sky': False, 'apply_wiener': False,
-                'klm':  f'{act}/kappa_act_dr6_baseline_ns512_WF.fits',
-                'mask': f'{act}/mask_act_dr6_baseline_ns512.fits',
-                'nlkk': None}
-    raise KeyError(f"cmb_map desconocido: '{key}'")
+    specs = {
+        'PLANCK_PR4': {'label': 'PLANCK_PR4', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/KAPPA_PR4klm_MV.fits',
+                       'mask': f'{L}/Common_mask_PR4Lensing_2048.fits',
+                       'nlkk': f'{L}/nlkk_PR4_MV.dat'},
+        'PLANCK_PR3': {'label': 'PLANCK_PR3', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/KAPPA_PR3klm_MV.fits',
+                       'mask': f'{L}/Common_mask_Lensing_2048.fits',
+                       'nlkk': nlkk_pr3},
+        'PLANCK_CIB': {'label': 'PLANCK_CIB', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/CIBdeproj/dat_klm_MV.fits',
+                       'mask': f'{L}/CIBdeproj/mask.fits',
+                       'nlkk': nlkk_pr3},                   # CIB: usa el nlkk de PR3
+        'PLANCK_INHOM': {'label': 'PLANCK_inhom', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/Inhf/dat_klm_MV.fits',
+                       'mask': f'{L}/Inhf/mask.fits',
+                       'nlkk': f'{L}/Inhf/nlkk.dat'},
+        'PLANCK_SZ': {'label': 'PLANCK_SZ', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/Sz/dat_klm_MV.fits',
+                       'mask': f'{L}/Sz/mask.fits',
+                       'nlkk': f'{L}/Sz/nlkk.dat'},
+        'PLANCK_SZ_DEPROJ': {'label': 'PLANCK_SZ_deproj', 'kind': 'alm', 'frame': 'galactic',
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'klm':  f'{L}/Szdeproj/dat_klm_MV.fits',
+                       'mask': f'{L}/Szdeproj/mask.fits',
+                       'nlkk': f'{L}/Szdeproj/nlkk.dat'},
+        'ACT': {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
+                       'nside': 512, 'full_sky': False, 'apply_wiener': False,
+                       'klm':  f'{act}/kappa_act_dr6_baseline_ns512_WF.fits',
+                       'mask': f'{act}/mask_act_dr6_baseline_ns512.fits',
+                       'nlkk': None},
+    }
+    if key == 'PLANCK':
+        key = 'PLANCK_PR4'
+    if key not in specs:
+        raise KeyError(f"cmb_map desconocido: '{cmb_map}'. Opciones: "
+                       f"{list(specs)} + {list(MAP_GROUPS)}")
+    return specs[key]
 
 
 def _ensure_galactic(df, cat):
@@ -87,12 +116,11 @@ def _ensure_galactic(df, cat):
     return df
 
 
-#%% Run pipeline function
-def run_pipeline(config):
+#%% Run pipeline (un solo mapa)
+def _run_single_map(config):
     data_folder = config['data_folder']
     output_folder = os.path.join(config['output_folder'], 'lensing')   # Results/lensing/
     os.makedirs(output_folder, exist_ok=True)
-    release = config['release']
     zmin, zmax = config['zmin'], config['zmax']
     rmin, rmax = config['rmin'], config['rmax']
 
@@ -103,8 +131,9 @@ def run_pipeline(config):
     # --- Spec del mapa (rutas/frame/nside) + cap de npix para no sobremuestrear ---
     # El void mas compacto angularmente (z=zmax, Rv=rmin) fija la resolucion minima:
     # npix tal que reso_arcmin >= tamano de pixel del mapa. Asi ningun void sobremuestrea.
-    mspec = _map_spec(config)
+    mspec = _map_spec(config['cmb_map'], data_folder)
     map_label = mspec['label']
+    release = map_label      # etiqueta usada en los nombres de cache (antes: config['release'])
     pix_arcmin = hp.nside2resol(mspec['nside'], arcmin=True)
     box_deg_min = fm.get_angularsize_comoving(zmax, 2 * max_Rvoid * rmin)
     npix_cap = int(np.floor(box_deg_min * 60.0 / pix_arcmin))
@@ -167,7 +196,7 @@ def run_pipeline(config):
         else:
             filter_label = 'no_filter'
 
-    base_suffix = (f'{release}_{mode_label}_{exec_mode}_'
+    base_suffix = (f'{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
                    f'{delta_label}_{filter_label}')
@@ -178,7 +207,7 @@ def run_pipeline(config):
 
     # Migración de corridas WH viejas (carpeta sin prefijo de catálogo): si existe y
     # no se fuerza el rerun, se renombra a WH_... y se saltea el análisis.
-    if (not force_rerun) and cat_label == 'WH' and map_label == f'PLANCK_{release}' \
+    if (not force_rerun) and cat_label == 'WH' and map_label == 'PLANCK_PR4' \
             and os.path.isdir(legacy_folder) and not os.path.isdir(run_folder):
         os.rename(legacy_folder, run_folder)
         print(f'[migrate] Carpeta legacy encontrada: renombrada\n'
@@ -196,7 +225,7 @@ def run_pipeline(config):
         os.makedirs(stacks_cache_folder)
 
     print(f'######### CMB LENSING PROFILES USING {cat_label} VOIDS CATALOGUE [PARALLEL] #########')
-    print(f'Configuration: Release={release} | Mode={exec_mode} | Binning={binning_mode} | n_workers={n_workers or os.cpu_count()}')
+    print(f'Configuration: Map={map_label} | Mode={exec_mode} | Binning={binning_mode} | n_workers={n_workers or os.cpu_count()}')
     print(f'Output Run Folder: {run_folder}')
     print('')
 
@@ -536,6 +565,63 @@ def run_pipeline(config):
                      'parameters': parameters},
                      f)
         print(f"Data saved in: {data_save_path}")
+
+    return _primary_result(all_results, map_label)
+
+
+def _primary_result(all_results, map_label):
+    """Resultado representativo (bin 0) de una corrida, para el panel comparativo.
+    Prioridad de catalogo: merged > concat > single."""
+    if not all_results:
+        return None
+    for cat in ('merged', 'concat', 'single'):
+        for r in all_results:
+            if r.get('catalog') == cat and int(r.get('bin_id', 0)) == 0:
+                out = dict(r); out['map_label'] = map_label
+                return out
+    out = dict(all_results[0]); out['map_label'] = map_label
+    return out
+
+
+#%% Dispatcher: un mapa, o un grupo (All_Planck / All) + panel comparativo
+def run_pipeline(config):
+    req = str(config.get('cmb_map', 'PLANCK_PR4'))
+    if req.upper() not in MAP_GROUPS:
+        _run_single_map(config)                       # caso mapa unico (comportamiento previo)
+        return
+
+    keys = MAP_GROUPS[req.upper()]
+    data_folder = config['data_folder']
+    print(f"\n######### GRUPO {req.upper()}: {len(keys)} mapas -> {keys} #########")
+
+    collected = {}
+    for k in keys:
+        cfg = dict(config); cfg['cmb_map'] = k
+        print(f"\n================= MAPA {k}  ({req.upper()}) =================")
+        try:
+            res = _run_single_map(cfg)
+        except FileNotFoundError as e:
+            print(f"[grupo] '{k}' salteado (archivo faltante): {e}")
+            continue
+        if res is not None:
+            collected[res['map_label']] = res
+
+    if len(collected) < 2:
+        print("[grupo] menos de 2 mapas con resultado; no genero panel comparativo.")
+        return
+
+    cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
+    out = os.path.join(config['output_folder'], 'lensing')
+    tag = 'AllPlanck' if req.upper() == 'ALL_PLANCK' else 'All'
+    fname = (f"MapComparison_{tag}_{cat_label}_{config['binning_mode']}_"
+             f"{config['n_bins']}bins_{config['zmin']}_{config['zmax']}_"
+             f"{config['rmin']}_{config['rmax']}.pdf")
+    cmp_path = os.path.join(out, fname)
+    order = [_map_spec(k, data_folder)['label'] for k in keys]
+    fm.plot_map_comparison(collected, cmp_path, config['max_Rvoid'],
+                           success_label='PLANCK_PR4', order=order)
+    print(f"\n[grupo] panel comparativo guardado: {cmp_path}")
+
 
 if __name__ == "__main__":
     print("Please run from Pipeline_voids.py")
