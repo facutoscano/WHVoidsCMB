@@ -22,7 +22,7 @@ config = {
 
 
     # Data selection
-    'cmb_map': 'All_Planck',               # one map: 
+    'cmb_map': 'act-pr4',               # one map: 
                                         # 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
                                         # 'PLANCK_SZ'  | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # full analysis:
