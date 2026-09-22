@@ -26,7 +26,7 @@ config = {
                                         # grupos (panel comparativo, exito=PR4):
                                         #   'All_Planck' (PR3,PR4,CIB,inhom,Sz,Szdeproj)
                                         #   'All' (lo anterior + ACT)
-    'min_footprint_coverage': 0.9,      # conservar voids cuyo disco max_Rvoid*Rv este
+    'min_footprint_coverage': 0.7,      # conservar voids cuyo disco max_Rvoid*Rv este
                                         # >= 90% dentro de la mascara (0 = sin corte)
     'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
@@ -47,11 +47,11 @@ config = {
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
-    'Rvoid_bin': 0.14,        
+    'Rvoid_bin': 0.25,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'
-    'act_smooth_arcmin': 20.0,           # gaussiana EXTRA (FWHM arcmin) solo sobre ACT
+    'act_smooth_arcmin': 5.0,           # gaussiana EXTRA (FWHM arcmin) solo sobre ACT
                                         # (0 = sin suavizado extra; va al nombre de carpeta/cache)
 
     # Binning setup
