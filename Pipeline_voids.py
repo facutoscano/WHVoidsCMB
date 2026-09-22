@@ -22,7 +22,7 @@ config = {
 
 
     # Data selection
-    'cmb_map': 'act_pr4',               # one map: 
+    'cmb_map': 'ACT',               # one map: 
                                         # 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
                                         # 'PLANCK_SZ'  | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # full analysis:
@@ -50,7 +50,7 @@ config = {
                                         # True  -> use catalogue x,y,z_cart
     
     'zmin': 0.1, 'zmax': 0.5,            
-    'rmin': 25.0, 'rmax': 70.0,         
+    'rmin': 20.0, 'rmax': 30.0,         
 
     
     # Geometric setup
