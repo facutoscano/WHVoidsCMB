@@ -21,7 +21,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/New_Results/',
 
     # Data selection
-    'cmb_map': 'All_Planck',                   # un mapa: 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
+    'cmb_map': 'ACT',                   # un mapa: 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # grupos (panel comparativo, exito=PR4):
                                         #   'All_Planck' (PR3,PR4,CIB,inhom,Sz,Szdeproj)
@@ -51,6 +51,8 @@ config = {
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'
+    'act_smooth_arcmin': 10.0,           # gaussiana EXTRA (FWHM arcmin) solo sobre ACT
+                                        # (0 = sin suavizado extra; va al nombre de carpeta/cache)
 
     # Binning setup
     'binning_mode': 'redshift',         # 'redshift', 'radius'

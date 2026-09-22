@@ -43,7 +43,7 @@ MAP_GROUPS = {
 }
 
 
-def _map_spec(cmb_map, data_folder):
+def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
     """Ruta del klm/mapa, mascara, nlkk, frame, nside nativo y modo de filtrado
     por mapa de lensing. cmb_map in
       {'PLANCK_PR4','PLANCK_PR3','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj',
@@ -90,6 +90,7 @@ def _map_spec(cmb_map, data_folder):
                        'nlkk': f'{L}/Szdeproj/nlkk.dat'},
         'ACT': {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
                        'nside': 512, 'full_sky': False, 'apply_wiener': False,
+                       'smooth_arcmin': act_smooth_arcmin,   # gaussiana EXTRA sobre el mapa ya Wiener
                        'klm':  f'{act}/kappa_act_dr6_baseline_ns512_WF.fits',
                        'mask': f'{act}/mask_act_dr6_baseline_ns512.fits',
                        'nlkk': None},
@@ -131,7 +132,7 @@ def _run_single_map(config):
     # --- Spec del mapa (rutas/frame/nside) + cap de npix para no sobremuestrear ---
     # El void mas compacto angularmente (z=zmax, Rv=rmin) fija la resolucion minima:
     # npix tal que reso_arcmin >= tamano de pixel del mapa. Asi ningun void sobremuestrea.
-    mspec = _map_spec(config['cmb_map'], data_folder)
+    mspec = _map_spec(config['cmb_map'], data_folder, config.get('act_smooth_arcmin', 0.0))
     map_label = mspec['label']
     release = map_label      # etiqueta usada en los nombres de cache (antes: config['release'])
     pix_arcmin = hp.nside2resol(mspec['nside'], arcmin=True)
@@ -195,6 +196,9 @@ def _run_single_map(config):
             filter_label = 'wiener'
         else:
             filter_label = 'no_filter'
+    sm_extra = mspec.get('smooth_arcmin', 0.0)     # gaussiana EXTRA (p.ej. ACT)
+    if sm_extra and sm_extra > 0:
+        filter_label += f'_gsm{sm_extra:g}arcmin'
 
     base_suffix = (f'{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
@@ -250,6 +254,14 @@ def _run_single_map(config):
         lensing_map = hp.read_map(mspec['klm'])
         nside = hp.get_nside(lensing_map)               # 512 (maximo del mapa)
         print(f'Prefiltered map read (nside={nside}); no extra filtering applied.')
+
+    # Suavizado gaussiano EXTRA por-mapa (sobre lo que ya tenga el mapa). Para ACT
+    # es Wiener(ya aplicado) + gaussiana. Se hace full-sky: como usamos solo el
+    # interior del footprint (corte de cobertura), el sangrado del borde no entra
+    # al stack. La mascara NO se suaviza (sigue siendo footprint binario).
+    if sm_extra and sm_extra > 0:
+        lensing_map = hp.smoothing(lensing_map, fwhm=np.radians(sm_extra / 60.0))
+        print(f'Extra Gaussian smoothing applied: FWHM={sm_extra:.1f} arcmin.')
 
     common_mask = hp.read_map(mspec['mask'])
     if hp.get_nside(common_mask) != nside:
