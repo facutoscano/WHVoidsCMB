@@ -50,7 +50,7 @@ config = {
                                         # True  -> use catalogue x,y,z_cart
     
     'zmin': 0.1, 'zmax': 0.5,            
-    'rmin': 20.0, 'rmax': 30.0,         
+    'rmin': 30.0, 'rmax': 70.0,         
 
     
     # Geometric setup
