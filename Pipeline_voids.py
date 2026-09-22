@@ -51,7 +51,7 @@ config = {
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'
-    'act_smooth_arcmin': 10.0,           # gaussiana EXTRA (FWHM arcmin) solo sobre ACT
+    'act_smooth_arcmin': 20.0,           # gaussiana EXTRA (FWHM arcmin) solo sobre ACT
                                         # (0 = sin suavizado extra; va al nombre de carpeta/cache)
 
     # Binning setup
