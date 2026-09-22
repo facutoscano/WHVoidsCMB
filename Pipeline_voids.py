@@ -24,7 +24,7 @@ config = {
     'release': 'PR4',                   # 'PR3' or 'PR4'
     'cmb_map': 'ACT',                   # 'PLANCK_PR4' | 'PLANCK_CIB' | 'PLANCK_SZ' |
                                         # 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
-    'min_footprint_coverage': 0.7,      # conservar voids cuyo disco max_Rvoid*Rv este
+    'min_footprint_coverage': 0.6,      # conservar voids cuyo disco max_Rvoid*Rv este
                                         # >= 90% dentro de la mascara (0 = sin corte)
     'void_catalog': 'WH',               # 'WH' (Wen&Han, galactic l,b) or 'BOSS' (equatorial ra,dec)
     'N_seeds': 100,                      # Number of random seeds used to identify voids.
@@ -45,7 +45,7 @@ config = {
     
     # Geometric setup
     'max_Rvoid': 2.5,                  
-    'Rvoid_bin': 0.14,        
+    'Rvoid_bin': 0.2,        
     'npix_stamp': 400,                  # Number of pixels in the stamp (square) for stacking 
     'filter_mode': 'wiener',            # 'none', 'gaussian', 'wiener'          
     'smooth_value_arcmin': 0.0,         # Just used if filter_mode is 'gaussian'
@@ -56,7 +56,7 @@ config = {
    
     # Error estimation setup
     'exec_mode': 'errors',              # 'no_errors' or 'errors'
-    'n_subsamples': 60,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
+    'n_subsamples': 30,                 # Number of jackknife subsamples for error estimation if 'exec_mode' is 'errors'           
     'n_rand_factor': 300,               # Number of realizations of random positions for cosmic variance estimation
     'n_rotations': 30,                  # Number of random rotations of the cmb map for cosmic variance estimation
     'random_pool': 'full',              # 'full'  -> randoms over the whole CMB-lensing footprint (common_mask)
