@@ -1,23 +1,7 @@
-##### Parallel stacking module for the CMB lensing voids profiles #####
-# Mirrors Functions_module.process_bin_stacking, but parallelizes the
-# embarrassingly-parallel parts (random null, rotation null, jackknife/signal
-# region stacks) over CPU cores with a fork-based ProcessPoolExecutor.
-#
-# Design notes
-# ------------
-# * The big read-only arrays (CMB map and stamp mask) are stored as module
-#   globals and inherited by the worker processes via fork (copy-on-write), so
-#   they are NOT pickled per task. Only the (small) per-void coordinate arrays
-#   travel to the workers.
-# * Rotation null tests are implemented as rigid longitude shifts of the void
-#   positions (l -> l-ang) instead of rotating the whole healpix map. For a
-#   pure z-rotation rot=[ang,0,0] this samples exactly the same sky pixels, so
-#   it is equivalent to the serial map-rotation for radially-averaged profiles,
-#   but avoids building 400 MB rotated maps in every worker.
-# * Cache file names and the returned dict are kept identical to the serial
-#   Functions_module.process_bin_stacking, so serial and parallel caches are
-#   interchangeable.
+##### Stacking module for the CMB lensing voids profiles #####
+# ---------------------------------------------------------------------
 
+#%% Imports
 import os
 import pickle
 import warnings
@@ -25,44 +9,43 @@ import numpy as np
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.cluster import KMeans
-
 import Functions_module as fm
 
-# --- Worker globals (set before the pool is created; inherited via fork) ------
+#%% Workers
 _W_CMB = None     # CMB lensing map
-_W_STAMP = None   # stamp mask used while stacking (common_mask)
-
+_W_STAMP = None   # stamp mask used while stacking
 
 def _set_worker_globals(cmb_map, stamp_mask):
     global _W_CMB, _W_STAMP
     _W_CMB, _W_STAMP = cmb_map, stamp_mask
 
-
-# --- Workers ------------------------------------------------------------------
 def _profile_worker(task):
-    """Stack at given positions and return the count-weighted radial profile."""
+    """
+    Stack at given positions and return the count-weighted radial profile
+    """
     pos_l, pos_b, z, rv, max_Rvoid, npix_stamp, bins_frac = task
     s, c = fm.stacking_gnomonic(pos_l, pos_b, z, rv, _W_CMB, _W_STAMP,
                                 max_Rvoid, npix_stamp, range(len(pos_l)), silent=True)
     prof, _ = fm.radial_profile_weighted(s, c, max_Rvoid, bins_frac, silent=True)
     return prof
 
-
 def _region_worker(task):
-    """Stack a void subset and return its (sum_map, count_map) for JK/signal."""
+    """
+    Stack a void subset and return its (sum_map, count_map) for JK/signal
+    """
     l_sub, b_sub, z_sub, rv_sub, max_Rvoid, npix_stamp = task
     s, c = fm.stacking_gnomonic(l_sub, b_sub, z_sub, rv_sub, _W_CMB, _W_STAMP,
                                 max_Rvoid, npix_stamp, range(len(l_sub)), silent=True)
     return s, c
 
 
-# --- Parallel null tests ------------------------------------------------------
+#%% Null tests
 def _rotation_null_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_stamp,
                             bins_frac, n_rotations, existing_profiles):
     n_old = len(existing_profiles)
     if n_rotations <= n_old:
         return np.array(existing_profiles[:n_rotations])
-    print(f'[parallel] {n_rotations - n_old} additional longitude-shift rotations...')
+    print(f'[Null Test] {n_rotations - n_old} longitude-shift rotations...')
     np.random.seed(42 + n_old)
     angles = np.random.uniform(10, 350, n_rotations - n_old)
     tasks = [((l - ang) % 360.0, b, redshifts, r_voids, max_Rvoid, npix_stamp, bins_frac)
@@ -70,17 +53,16 @@ def _rotation_null_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_
     new_profiles = list(executor.map(_profile_worker, tasks))
     return np.array(list(existing_profiles) + new_profiles)
 
-
 def _random_null_parallel(executor, nside, redshifts, r_voids, position_mask, max_Rvoid,
                           npix_stamp, bins_frac, n_random_factor, existing_profiles):
     n_old = len(existing_profiles)
     if n_random_factor <= n_old:
         return np.array(existing_profiles[:n_random_factor])
-    print(f'[parallel] {n_random_factor - n_old} additional random realizations...')
+    print(f'[Null Test] {n_random_factor - n_old} random realizations...')
     n_voids = len(redshifts)
     tasks = []
     for i in range(n_old, n_random_factor):
-        np.random.seed(1000 + i)  # deterministic & resumable
+        np.random.seed(1000 + i)
         rand_l, rand_b = fm.generate_random(position_mask, n_voids, nside)
         perm = np.random.permutation(n_voids)
         tasks.append((rand_l, rand_b, redshifts[perm], r_voids[perm],
@@ -89,7 +71,7 @@ def _random_null_parallel(executor, nside, redshifts, r_voids, position_mask, ma
     return np.array(list(existing_profiles) + new_profiles)
 
 
-# --- Parallel signal + jackknife ----------------------------------------------
+#%% Profiles
 def _signal_and_jk_parallel(executor, 
                             l, b, redshifts, 
                             r_voids, max_Rvoid,
@@ -102,7 +84,7 @@ def _signal_and_jk_parallel(executor,
         xyz = np.column_stack([np.cos(dec_rad) * np.cos(ra_rad),
                                np.cos(dec_rad) * np.sin(ra_rad),
                                np.sin(dec_rad)])
-        print(f'[parallel] Dividing {n_voids} voids into {n_subsamples} jackknife regions (KMeans)...')
+        print(f'[Profiles] Dividing {n_voids} voids into {n_subsamples} jackknife regions...')
         labels = KMeans(n_clusters=n_subsamples, random_state=42, n_init=10).fit_predict(xyz)
         regions = [np.where(labels == k)[0] for k in range(n_subsamples)]
     else:
@@ -145,7 +127,7 @@ def _signal_and_jk_parallel(executor,
     return signal_map, prof_total, r_frac, err, jk_profiles, cov_matrix
 
 
-# --- Main entry point  --------------
+#%% Main
 def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, data_sample_bin,
                                   coords_bin, max_Rvoid, npix_stamp, nside, bins_frac, lensing_map,
                                   common_mask, stacks_cache_folder, n_random_factor, n_rotations,
@@ -158,9 +140,8 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
     l, b, redshifts_all, r_voids_all = coords_bin[0], coords_bin[1], data_sample_bin['z'].values, data_sample_bin['R_void'].values
 
     n_workers = n_workers or os.cpu_count()
-    print(f'[parallel] Bin z in [{z_min:.2f},{z_max:.2f}], {n_voids} voids (mean z={z_mean:.3f}), n_workers={n_workers}...')
+    print(f'[Data] Bin z in [{z_min:.2f},{z_max:.2f}], {n_voids} voids (mean z={z_mean:.3f}), n_workers={n_workers}...')
 
-    # --- Random null pool (same construction as the serial version) ---
     if random_pool == 'survey':
         random_base_mask = common_mask * fm.footprint_mask(l, b, output_nside=nside)
     else:
@@ -178,9 +159,9 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
         with open(signal_cache_file, 'rb') as f:
             cached_data = pickle.load(f)
         if cached_data.get('n_rotations_done', 0) >= n_rotations and cached_data.get('n_randoms_done', 0) >= n_random_factor:
-            print(f'[parallel] Loading fully cached result from {signal_cache_file}.')
+            print(f'[Data] Loading fully cached result from {signal_cache_file}.')
             return cached_data
-        print('[parallel] Signal cached, but more null tests requested. Updating...')
+        print('[Data] Signal cached, but more null tests requested. Updating...')
         signal_data = cached_data
     else:
         signal_data = None
@@ -192,7 +173,6 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
         if 'null_profiles_rot' in data_cache: existing_rot = list(data_cache['null_profiles_rot'])
         if 'null_profiles_rand' in data_cache: existing_rand = list(data_cache['null_profiles_rand'])
 
-    # Publish big read-only arrays to workers (inherited via fork), then open pool.
     _set_worker_globals(lensing_map, common_mask)
     ctx = mp.get_context('fork')
 
@@ -230,7 +210,7 @@ def process_bin_stacking_parallel(release, mode, z_min, z_max, r_min, r_max, dat
                 pickle.dump(signal_data, f)
             return signal_data
 
-        print('[parallel] Computing signal stack and errors...')
+        print('[Profiles] Computing signal stack and errors...')
         signal_map, prof_total, r_frac, prof_err, jk_profiles, cov_jk = _signal_and_jk_parallel(
             executor, l, b, redshifts_all, r_voids_all, max_Rvoid, npix_stamp, bins_frac, mode, n_subsamples, n_workers)
 

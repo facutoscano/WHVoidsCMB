@@ -1,6 +1,6 @@
 ##### Function module for the CMB lensing voids profiles #####
 
-#%% IMPORTS
+#%% Imports
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,7 +25,7 @@ plt.rcParams.update({
     'legend.fontsize': 11, 'legend.frameon': False             
 })
 
-#%% AUXILIARY FUNCTIONS
+#%% Auxiliary Functions
 def get_angularsize_comoving(z, size_mpch):
     h = Planck18.h
     d_c = Planck18.comoving_distance(z).value * h
@@ -36,8 +36,8 @@ def get_angularsize_comoving(z, size_mpch):
 def apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048):
     nlkk_data = np.loadtxt(nlkk_file)
     ell_nlkk = nlkk_data[:, 0].astype(int)
-    nl_kk = nlkk_data[:, 1]     # noise
-    sn_kk = nlkk_data[:, 2]     # signal + noise
+    nl_kk = nlkk_data[:, 1]             # noise
+    sn_kk = nlkk_data[:, 2]             # signal + noise
 
     cl_kk = sn_kk - nl_kk
     cl_kk = np.maximum(cl_kk, 0)        # avoiding negative Cls
@@ -51,12 +51,8 @@ def apply_wiener_filter(cmb_alm, nlkk_file, lmax=2048):
     
     alm_filtered = hp.almxfl(cmb_alm.copy(), W)
 
-    print(f'Wiener filter applied. W_ell range: '
-          f'W[10]={W[10]:.3f}, W[100]={W[100]:.3f}, '
-          f'W[500]={W[500]:.3f}, W[1000]={W[1000]:.3f}')
-
+    print(f'[Data] Wiener filter applied.')
     return alm_filtered, W
-
 
 def footprint_mask(l, b, output_nside, footprint_nside=32): 
     npix_footprint = hp.nside2npix(footprint_nside)
@@ -67,26 +63,25 @@ def footprint_mask(l, b, output_nside, footprint_nside=32):
     output_mask[output_mask > 0] = 1.0
     return output_mask
 
-
 def to_map_frame(l_gal, b_gal, frame):
-    """(l,b) galacticas [deg] -> coordenadas en el frame nativo del mapa.
-    'galactic' -> igual; 'equatorial'/'icrs' -> (ra,dec). Los perfiles radiales
-    son invariantes ante rotacion, asi que solo importa apuntar al pixel correcto."""
+    """
+    (l,b) galactic [deg]
+    'galactic' -> same |
+    'equatorial'/'icrs' -> (ra,dec)
+    """
     if frame in ('galactic', 'gal'):
         return np.asarray(l_gal, float), np.asarray(b_gal, float)
     if frame in ('equatorial', 'icrs', 'celestial'):
         c = SkyCoord(l=np.asarray(l_gal) * u.degree,
                      b=np.asarray(b_gal) * u.degree, frame='galactic').icrs
         return c.ra.degree, c.dec.degree
-    raise ValueError(f'frame desconocido: {frame}')
-
+    raise ValueError(f'unknown frame: {frame}')
 
 def footprint_coverage(l_gal, b_gal, z, r_void, mask, nside, frame,
                        max_Rvoid, cov_radius_frac=None):
-    """Fraccion de la mascara dentro del disco de radio (cov_radius_frac o
-    max_Rvoid)*Rv alrededor de cada void, evaluada EN EL FRAME DEL MAPA.
-    Devuelve un array de cobertura in [0,1], uno por void. Con mascara binaria,
-    cobertura = fraccion del disco dentro del footprint."""
+    """
+    Coverage = Void fraction within the footprint
+    """
     lon, lat = to_map_frame(l_gal, b_gal, frame)
     rad = max_Rvoid if cov_radius_frac is None else cov_radius_frac
     cov = np.empty(len(lon))
@@ -96,7 +91,6 @@ def footprint_coverage(l_gal, b_gal, z, r_void, mask, nside, frame,
         pix = hp.query_disc(nside, vec, np.radians(theta_deg))
         cov[i] = mask[pix].mean() if len(pix) else 0.0
     return cov
-
 
 def generate_random(mask, n_random, nside):
     valid_l, valid_b, count = [], [], 0
@@ -111,7 +105,6 @@ def generate_random(mask, n_random, nside):
         count = len(valid_l)
     return np.array(valid_l[:n_random]), np.array(valid_b[:n_random])
 
-
 def rotate_map(map_data, rot_angles):
     nside = hp.npix2nside(len(map_data))
     npix = hp.nside2npix(nside)
@@ -121,9 +114,8 @@ def rotate_map(map_data, rot_angles):
     pix_rot = hp.ang2pix(nside, theta_rot, phi_rot)
     return map_data[pix_rot]
 
-
 def stacking_gnomonic(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_stamp, stacked_range, silent=False):
-    if not silent: print(f'Stacking {len(stacked_range)} maps using scaled Rv...')
+    if not silent: print(f'[Profiles] Stacking {len(stacked_range)} maps...')
     sum_map   = np.zeros((npix_stamp, npix_stamp))
     count_map = np.zeros((npix_stamp, npix_stamp))
     nside = hp.npix2nside(len(cmb_map))
@@ -143,7 +135,6 @@ def stacking_gnomonic(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_s
         sum_map[valid]   += stamp_data[valid]
         count_map[valid] += 1
         if not silent and (i+1) % 150 == 0: print(f'Stacked {i+1} / {len(stacked_range)}')
-
     return sum_map, count_map
 
 def stack_mean_map(sum_map, count_map):
@@ -163,7 +154,7 @@ def radial_profile_flat(stack_map, max_Rvoid, bins_frac, silent=False):
 
     profile, r_centers = [], []
     
-    if not silent: print(f'Computing radial profile with bins_frac={bins_frac}...')
+    if not silent: print(f'[Profiles] Computing radial profile with bins_frac={bins_frac}...')
     
     for i in range(len(bins_frac)-1):
         mask_ring = (r_units >= bins_frac[i]) & (r_units < bins_frac[i+1]) & (~np.isnan(stack_map))
@@ -183,7 +174,7 @@ def radial_profile_weighted(sum_map, count_map, max_Rvoid, bins_frac, silent=Fal
     r_units = np.sqrt(x*x + y*y) * (2 * max_Rvoid) / npix
 
     profile, r_centers = [], []
-    if not silent: print('Computing count-weighted radial profile...')
+    if not silent: print('[Profiles] Computing count-weighted radial profile...')
     for i in range(len(bins_frac)-1):
         ring = (r_units >= bins_frac[i]) & (r_units < bins_frac[i+1])
         den = np.nansum(count_map[ring])
@@ -212,14 +203,16 @@ def sample_covariance(profiles, kind='jk'):
     return C, err
 
 def build_random_exclusion_mask(base_mask, l, b, redshifts, r_voids, excl_factor, nside, silent=False):
-    """Return a copy of base_mask with angular disks of radius (excl_factor * Rv) around
+    """
+    Return a copy of base_mask with angular disks of radius (excl_factor * Rv) around
     every real void zeroed out, so random null positions cannot land on real voids.
-    excl_factor is in units of Rv; with excl_factor<=0 or None the mask is returned unchanged."""
+    excl_factor is in units of Rv; with excl_factor<=0 or None the mask is returned unchanged
+    """
     if excl_factor is None or excl_factor <= 0:
         return base_mask
     excl = base_mask.copy()
     if not silent:
-        print(f'Building random-exclusion mask around {len(l)} voids (excl_factor={excl_factor}*Rv)...')
+        print(f'[Mask] Building random-exclusion mask around {len(l)} voids (excl_factor={excl_factor}*Rv)...')
     for i in range(len(l)):
         theta_deg = get_angularsize_comoving(redshifts[i], excl_factor * r_voids[i])
         vec = hp.ang2vec(l[i], b[i], lonlat=True)
@@ -227,16 +220,13 @@ def build_random_exclusion_mask(base_mask, l, b, redshifts, r_voids, excl_factor
         excl[pix] = 0.0
     if not silent:
         f_in, f_out = base_mask.mean(), excl.mean()
-        print(f'  random pool: {f_out/f_in*100:.1f}% of the base footprint remains after exclusion.')
+        print(f'[Mask] random pool: {f_out/f_in*100:.1f}% of the base footprint remains after exclusion.')
     return excl
 
 def build_rvoid_summary(bin_results, print_table=True):
-    """Resumen por muestra del radio mediano de los voids apilados [Mpc/h].
-
-    Devuelve una lista de dicts (uno por bin y por catálogo: 'single'/'concat' y
-    'merged') pensada para guardarse dentro de 'parameters' en el .pkl de la corrida,
-    y la imprime por pantalla. En las corridas multi-seed concatenadas se agrega
-    además la media y la dispersión de las medianas de cada seed."""
+    """
+    Summary of the sample according median radius of the stacked voids
+    """
     def _kind(res):
         return res.get('catalog','single')
 
@@ -272,9 +262,7 @@ def build_rvoid_summary(bin_results, print_table=True):
             print(f"{e['bin_id']+1:>4} {e['catalog']:>8} {str(e['z_range']):>12} "
                   f"{e['n_voids']:>8} {e['R_void_median']:>8.2f}{seeds_txt}")
         print('')
-
     return summary
-
 
 def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
     n_bins = len(data_list)
@@ -404,9 +392,8 @@ def plot_stacked_maps_and_profiles(data_list, output_path, max_Rvoid):
             ax_sig.tick_params(labelleft=False)
 
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Stacked maps + profiles + significance plot saved to {output_path}")
+    print(f"[Plots] Stacked maps + profiles + significance plot saved to {output_path}")
     plt.close()
-
 
 def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
     n_bins = len(bin_results)
@@ -456,12 +443,11 @@ def plot_jackknife_and_correlation(bin_results, output_path, max_Rvoid):
                    True)
         _plot_corr(axes[row, 2], 
                    cov_cmb, 
-                   f"CMB (randoms) corr. — Bin {label}",
+                   f"CMB corr. — Bin {label}",
                    False)
 
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
-
 
 def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
     ms_bins = [d for d in bin_results_list if d.get('catalog') == 'concat' and d.get('seed_results') is not None]
@@ -497,13 +483,6 @@ def plot_seed_consistency(bin_results_list, output_path, max_Rvoid):
 
 
 def plot_merge_vs_concat(pair_list, output_path, max_Rvoid):
-    """
-    Compara, por bin, el perfil kappa(r) del catálogo CONCATENADO (multi-seed con
-    duplicados) contra el catálogo MERGEADO (DBSCAN, un void por fila).
-      Fila superior: kappa(r) de ambos con error JK.
-      Fila inferior: diferencia (concat - merge) con error combinado en cuadratura.
-    Cada `pair` es {'bin_id', 'key', 'concat': res, 'merge': res}.
-    """
     n = len(pair_list)
     if n == 0:
         return
@@ -545,20 +524,13 @@ def plot_merge_vs_concat(pair_list, output_path, max_Rvoid):
 
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
-    print(f"Merge-vs-concat comparison plot saved to {output_path}")
-
+    print(f"[Plots] Merge-vs-concat comparison plot saved to {output_path}")
 
 def plot_map_comparison(collected, output_path, max_Rvoid,
                         success_label='PLANCK_PR4', order=None):
-    """Panel unico con el perfil NETO (kappa - null_rand_mean) de varios mapas.
-      - success_label (PR4): con barras de error (JK + error del null) y banda de
-        1sigma de cosmic variance (+/- null_rand_std).
-      - los demas: linea de color, sin barras.
-    collected: {map_label: result_dict} (cada uno con r_frac, profile, error,
-    null_rand_mean, null_rand_std, n_randoms_done, n_voids)."""
     labels = [l for l in (order or list(collected.keys())) if l in collected]
     if not labels:
-        print("[compare] nada para plotear.")
+        print("[Plots] Nothing for plot")
         return
 
     def _net(d):
@@ -590,7 +562,7 @@ def plot_map_comparison(collected, output_path, max_Rvoid,
         net, nerr, band = _net(d)
         if band is not None:
             ax.fill_between(d['r_frac'], -band * 1e3, band * 1e3, color='xkcd:grey',
-                            alpha=0.35, zorder=1, label=r'PR4 $1\sigma$ cosmic var.')
+                            alpha=0.35, zorder=1, label=r'PR4 $1\sigma$ cosmic var')
         ax.errorbar(d['r_frac'], net * 1e3, yerr=nerr * 1e3, fmt='o-', color='k',
                     capsize=3, linewidth=2.0, zorder=5,
                     label=f"{success_label} (N={d.get('n_voids', '?')})")
@@ -602,12 +574,10 @@ def plot_map_comparison(collected, output_path, max_Rvoid,
     ax.legend(loc='lower right', frameon=True, fontsize=9)
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
-    print(f"Map-comparison panel saved to {output_path}")
+    print(f"[Plots] Map-comparison panel saved to {output_path}")
 
 
 def _net_and_err(d):
-    """Perfil neto (kappa - null_rand_mean) y su error combinado (JK + error del
-    null). Convencion identica a plot_stacked_maps_and_profiles."""
     prof, err = np.asarray(d['profile']), np.asarray(d['error'])
     nrm, nrs = d.get('null_rand_mean'), d.get('null_rand_std')
     nr = d.get('n_randoms_done', 0) or 0
@@ -622,17 +592,8 @@ def _net_and_err(d):
 
 def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_label,
                     footprint_mask=None, footprint_coord='C'):
-    """Panel para act-pr4:
-      - izq. arriba: perfil neto de PR4 (negro, barras + banda cosmic var) y de ACT
-        (color, barras).
-      - izq. abajo: significancia de la diferencia (PR4-ACT)/sqrt(sig_pr4^2+sig_act^2).
-        OJO: PR4 y ACT son los MISMOS voids -> estan muy correlacionados; esta sigma
-        (suma en cuadratura, i.e. independientes) SOBRESTIMA el error de la diferencia
-        -> es una cota conservadora. El test exacto necesita un jackknife conjunto.
-      - der.: footprint (mostrado en galacticas) + voids usados.
-    """
     if success_label not in collected or other_label not in collected:
-        print("[act-pr4] faltan curvas para el panel.")
+        print("[Plots] Not so much profiles")
         return
     ds, do = collected[success_label], collected[other_label]
     r = np.asarray(ds['r_frac'])
@@ -645,12 +606,11 @@ def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_labe
     ax_p = fig.add_subplot(gs[0, 0])
     ax_s = fig.add_subplot(gs[1, 0], sharex=ax_p)
 
-    # --- perfiles ---
     ax_p.axhline(0, color='k', linestyle=':', alpha=0.6)
     ax_p.axvline(1.0, color='gray', linestyle='--', alpha=0.7)
     if band_s is not None:
         ax_p.fill_between(r, -band_s * 1e3, band_s * 1e3, color='xkcd:grey',
-                          alpha=0.30, zorder=1, label=r'PR4 $1\sigma$ cosmic var.')
+                          alpha=0.30, zorder=1, label=r'PR4 $1\sigma$ cosmic var')
     ax_p.errorbar(r, net_o * 1e3, yerr=err_o * 1e3, fmt='s-', color='xkcd:teal',
                   capsize=3, linewidth=1.7, zorder=4,
                   label=f"{other_label} (N={do.get('n_voids','?')})")
@@ -662,7 +622,6 @@ def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_labe
     ax_p.legend(loc='lower right', frameon=True, fontsize=9)
     ax_p.tick_params(labelbottom=False)
 
-    # --- significancia de la diferencia ---
     denom = np.sqrt(err_s ** 2 + err_o ** 2)
     with np.errstate(divide='ignore', invalid='ignore'):
         sig = (net_s - net_o) / denom
@@ -678,25 +637,24 @@ def plot_act_vs_pr4(collected, output_path, max_Rvoid, success_label, other_labe
     ax_s.set_ylabel(r'$\dfrac{\kappa_{\rm PR4}-\kappa_{\rm ACT}}{\sqrt{\sigma_{\rm PR4}^2+\sigma_{\rm ACT}^2}}$')
     ax_s.grid(True, alpha=0.25)
 
-    # --- footprint (galacticas) + voids ---
     ax_m = fig.add_subplot(gs[:, 1])
     if footprint_mask is not None:
         plt.sca(ax_m)
         try:
             hp.mollview(footprint_mask, coord=[footprint_coord, 'G'], hold=True,
                         cbar=False, cmap='Greys', min=0, max=1,
-                        title='Footprint (galactic) + voids usados')
+                        title='ACT footprint + voids')
             hp.graticule(dpar=30, dmer=30, alpha=0.3)
             vl = ds.get('void_l'); vb = ds.get('void_b')
             if vl is not None and vb is not None:
                 hp.projscatter(np.asarray(vl), np.asarray(vb), lonlat=True,
                                s=4, color='red', alpha=0.6)
         except Exception as e:
-            ax_m.text(0.5, 0.5, f'mollview fallo:\n{e}', ha='center', va='center',
+            ax_m.text(0.5, 0.5, f'mollview failed:\n{e}', ha='center', va='center',
                       transform=ax_m.transAxes, fontsize=9)
     else:
         ax_m.set_axis_off()
 
     plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close()
-    print(f"ACT-vs-PR4 panel saved to {output_path}")
+    print(f"[Plots] ACT vs PR4 panel saved to {output_path}")

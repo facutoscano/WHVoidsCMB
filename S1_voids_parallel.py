@@ -1,7 +1,4 @@
-#%% IMPORTS
-# Parallel twin of S1_voids.py: identical data loading / binning / plotting,
-# but the per-bin stacking is delegated to Parallel_module.process_bin_stacking_parallel
-# (random null, rotation null and jackknife/signal region stacks run across CPU cores).
+#%% Imports
 import os
 import numpy as np
 import healpy as hp
@@ -14,9 +11,8 @@ import Parallel_module as pm
 import void_seed_merge as vsm
 
 
+#%% Auxiliary Functions
 def _catalog_spec(catalog, data_folder):
-    """Rutas, columnas de coordenadas y frame por catálogo. Ambos comparten el
-    mismo layout de columnas; WH está en galáctico (l,b), BOSS en ecuatorial (ra,dec)."""
     label = (catalog or 'WH').upper()
     if label == 'BOSS':
         return {
@@ -32,9 +28,6 @@ def _catalog_spec(catalog, data_folder):
         'lon_col': 'l', 'lat_col': 'b', 'frame': 'galactic',
     }
 
-
-# Grupos multi-mapa (se corren en un loop y se plotean en un panel comun).
-# El caso de exito de referencia es PLANCK_PR4 (con error y cosmic variance).
 MAP_GROUPS = {
     'ALL_PLANCK': ['PLANCK_PR4', 'PLANCK_PR3', 'PLANCK_CIB',
                    'PLANCK_inhom', 'PLANCK_SZ', 'PLANCK_SZ_deproj'],
@@ -44,13 +37,15 @@ MAP_GROUPS = {
 
 
 def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
-    """Ruta del klm/mapa, mascara, nlkk, frame, nside nativo y modo de filtrado
-    por mapa de lensing. cmb_map in
-      {'PLANCK_PR4','PLANCK_PR3','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj',
-       'PLANCK_inhom','ACT'}.
-    Planck: klm en galacticas, nside 2048, Wiener con su propio nlkk (CIB usa el de
-    PR3, que no trae nlkk propio). Todo bajo CMB/PLANCK/Lensing/. ACT: mapa YA
-    Wiener-filtrado, ecuatoriales, nside 512, sin nlkk, cielo cortado."""
+    """
+    Routes of klm/map, mask, nlkk, frame, nside and filtering
+    cmb_map in:
+    {'PLANCK_PR4','PLANCK_PR3','PLANCK_CIB','PLANCK_SZ','PLANCK_SZ_deproj', 'PLANCK_inhom','ACT'}.
+
+    Planck: klm in galactic coordinates, native nside 2048, Wiener with its own nlkk 
+    (CIB uses PR3 nlkk)
+    ACT: klm in equatorials, native nside 512, already Wiener filterd
+    """
     d = data_folder.rstrip('/')
     key = str(cmb_map).upper()
     L = f'{d}/CMB/PLANCK/Lensing'
@@ -72,7 +67,7 @@ def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
                        'nside': 2048, 'full_sky': True, 'apply_wiener': True,
                        'klm':  f'{L}/CIBdeproj/dat_klm_MV.fits',
                        'mask': f'{L}/CIBdeproj/mask.fits',
-                       'nlkk': nlkk_pr3},                   # CIB: usa el nlkk de PR3
+                       'nlkk': nlkk_pr3},                  
         'PLANCK_INHOM': {'label': 'PLANCK_inhom', 'kind': 'alm', 'frame': 'galactic',
                        'nside': 2048, 'full_sky': True, 'apply_wiener': True,
                        'klm':  f'{L}/Inhf/dat_klm_MV.fits',
@@ -90,7 +85,7 @@ def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
                        'nlkk': f'{L}/Szdeproj/nlkk.dat'},
         'ACT': {'label': 'ACT', 'kind': 'map', 'frame': 'equatorial',
                        'nside': 512, 'full_sky': False, 'apply_wiener': False,
-                       'smooth_arcmin': act_smooth_arcmin,   # gaussiana EXTRA sobre el mapa ya Wiener
+                       'smooth_arcmin': act_smooth_arcmin,
                        'klm':  f'{act}/kappa_act_dr6_baseline_ns512_WF.fits',
                        'mask': f'{act}/mask_act_dr6_baseline_ns512.fits',
                        'nlkk': None},
@@ -98,15 +93,17 @@ def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
     if key == 'PLANCK':
         key = 'PLANCK_PR4'
     if key not in specs:
-        raise KeyError(f"cmb_map desconocido: '{cmb_map}'. Opciones: "
+        raise KeyError(f"unknown cmb_map: '{cmb_map}'. Options: "
                        f"{list(specs)} + {list(MAP_GROUPS)}")
     return specs[key]
 
 
 def _ensure_galactic(df, cat):
-    """Garantiza columnas galácticas 'l','b'. WH ya las tiene; BOSS se convierte
-    desde (ra,dec) ICRS para que todo el stacking/merge downstream use galácticas
-    (el mapa de lensing de Planck está en galácticas)."""
+    """
+    Ensure galactic coordinates (l, b)
+    WH already done |
+    BOSS is converted from (ra,dec)
+    """
     if cat['frame'] == 'galactic':
         return df
     c = SkyCoord(ra=df[cat['lon_col']].values * u.degree,
@@ -117,10 +114,10 @@ def _ensure_galactic(df, cat):
     return df
 
 
-#%% Run pipeline (un solo mapa)
+#%% Run pipeline
 def _run_single_map(config):
     data_folder = config['data_folder']
-    output_folder = os.path.join(config['output_folder'], 'lensing')   # Results/lensing/
+    output_folder = os.path.join(config['output_folder'], 'lensing') 
     os.makedirs(output_folder, exist_ok=True)
     zmin, zmax = config['zmin'], config['zmax']
     rmin, rmax = config['rmin'], config['rmax']
@@ -129,15 +126,9 @@ def _run_single_map(config):
     Rvoid_bin = config['Rvoid_bin']
     npix_stamp = config['npix_stamp']
 
-    # --- Spec del mapa (rutas/frame/nside) + cap de npix para no sobremuestrear ---
-    # El void mas compacto angularmente (z=zmax, Rv=rmin) fija la resolucion minima:
-    # npix tal que reso_arcmin >= tamano de pixel del mapa. Asi ningun void sobremuestrea.
     mspec = _map_spec(config['cmb_map'], data_folder, config.get('act_smooth_arcmin', 0.0))
     map_label = mspec['label']
-    release = map_label      # etiqueta usada en los nombres de cache (antes: config['release'])
-    # coverage_map: si se setea, la SELECCION de voids usa el footprint de OTRO mapa
-    # (p.ej. PR4 apilado pero seleccionando en el footprint de ACT). El stacking sigue
-    # sobre el mapa real. Solo se necesita su mascara.
+    release = map_label
     cov_map_key = config.get('coverage_map', None)
     cov_label = _map_spec(cov_map_key, data_folder)['label'] if cov_map_key else None
     pix_arcmin = hp.nside2resol(mspec['nside'], arcmin=True)
@@ -145,7 +136,7 @@ def _run_single_map(config):
     npix_cap = int(np.floor(box_deg_min * 60.0 / pix_arcmin))
     if npix_cap < npix_stamp:
         print(f'[npix] {map_label}: npix_stamp {npix_stamp} -> {npix_cap} '
-              f'(pixel {pix_arcmin:.2f} arcmin @ nside={mspec["nside"]}; sin sobremuestreo).')
+              f'(pixel {pix_arcmin:.2f} arcmin @ nside={mspec["nside"]}; not oversampling)')
         npix_stamp = max(1, npix_cap)
 
     bins_frac = np.arange(0, max_Rvoid + Rvoid_bin, Rvoid_bin)
@@ -159,15 +150,12 @@ def _run_single_map(config):
     random_factor = config.get('n_rand_factor', 10)
     n_rotations = config.get('n_rotations', 10)
     if not mspec['full_sky'] and n_rotations != 0:
-        print(f'[nulls] {map_label}: mapa de cielo cortado -> fuerzo n_rotations=0 '
-              f'(el null de rotacion saca los voids del footprint).')
+        print(f'[Null Test] {map_label}: not full-sky -> n_rotations=0 ')
         n_rotations = 0
     random_pool = config.get('random_pool', 'full')
     random_excl_factor = config.get('random_excl_factor', 1.0)
     n_workers = config.get('n_workers', None)
 
-    # Multi-seed handling: 'concat' (legacy, duplicates), 'merge' (DBSCAN single
-    # catalogue) or 'both' (run both and compare). Merge params reuse the tSZ ones.
     seed_mode = config.get('seed_mode', 'concat')
     do_concat = seed_mode in ('concat', 'both')
     do_merge = seed_mode in ('merge', 'both')
@@ -175,7 +163,6 @@ def _run_single_map(config):
     merge_min_frac = config.get('merge_min_frac', 0.2)
     merge_use_xyz = config.get('merge_use_catalog_xyz', False)
 
-    # Void catalogue: 'WH' (galactic l,b) or 'BOSS' (equatorial ra,dec).
     void_catalog = config.get('void_catalog', 'WH')
     cat = _catalog_spec(void_catalog, data_folder)
     cat_label = cat['label']
@@ -191,7 +178,7 @@ def _run_single_map(config):
     else:
         delta_label = f"d23_lt{abs(delta_23_value):.2f}"
 
-    if mspec['kind'] == 'map':                 # ACT: mapa ya filtrado
+    if mspec['kind'] == 'map':              
         filter_label = 'prefiltered'
     else:
         filter_label = config.get('filter_mode', 'none')
@@ -201,70 +188,62 @@ def _run_single_map(config):
             filter_label = 'wiener'
         else:
             filter_label = 'no_filter'
-    sm_extra = mspec.get('smooth_arcmin', 0.0)     # gaussiana EXTRA (p.ej. ACT)
+    sm_extra = mspec.get('smooth_arcmin', 0.0)
     if sm_extra and sm_extra > 0:
-        filter_label += f'_gsm{sm_extra:g}arcmin'
+        filter_label += f'_{sm_extra:g}arcmin'
 
     base_suffix = (f'{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
-                   f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
+                   f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix:.2f}Rvperpix_'
                    f'{delta_label}_{filter_label}'
                    + (f'_cov{cov_label}' if cov_label else ''))
     file_suffix = f'{cat_label}_{map_label}_{base_suffix}'
 
     run_folder = os.path.join(output_folder, file_suffix)
-    legacy_folder = os.path.join(output_folder, base_suffix)   # corridas previas sin prefijo (solo WH)
+    legacy_folder = os.path.join(output_folder, base_suffix)
 
-    # Migración de corridas WH viejas (carpeta sin prefijo de catálogo): si existe y
-    # no se fuerza el rerun, se renombra a WH_... y se saltea el análisis.
     if (not force_rerun) and cat_label == 'WH' and map_label == 'PLANCK_PR4' \
             and os.path.isdir(legacy_folder) and not os.path.isdir(run_folder):
         os.rename(legacy_folder, run_folder)
-        print(f'[migrate] Carpeta legacy encontrada: renombrada\n'
+        print(f'[migrate] Folder found: renaming\n'
               f'    {base_suffix}\n -> {file_suffix}\n'
-              f'  y se saltea el análisis (force_rerun=False).')
+              f'  skipping analysis (force_rerun=False).')
         return
 
     if not os.path.exists(run_folder):
         os.makedirs(run_folder)
 
-    # Caché separada por catálogo para que WH y BOSS no colisionen (los nombres de
-    # cache dependen de z/r/N, no del catálogo).
     stacks_cache_folder = os.path.join(output_folder, "Cache_Stacks", cat_label, map_label)
     if not os.path.exists(stacks_cache_folder):
         os.makedirs(stacks_cache_folder)
 
-    print(f'######### CMB LENSING PROFILES USING {cat_label} VOIDS CATALOGUE [PARALLEL] #########')
+    print(f'######### CMB LENSING PROFILES USING {cat_label} VOIDS CATALOGUE #########')
     print(f'Configuration: Map={map_label} | Mode={exec_mode} | Binning={binning_mode} | n_workers={n_workers or os.cpu_count()}')
     print(f'Output Run Folder: {run_folder}')
     print('')
 
     #%% CMB map and masks
-    print(f'Reading {map_label} CMB convergence map (frame={mspec["frame"]})...')
+    print(f'[Data] Reading {map_label} CMB convergence map (frame={mspec["frame"]})...')
     filter_mode = config.get('filter_mode', 'none')
 
     if mspec['kind'] == 'alm':
-        nside = mspec['nside']                          # Planck: 2048
+        nside = mspec['nside']                          
         cmb_alm = hp.fitsfunc.read_alm(mspec['klm'], hdu=1, return_mmax=False)
         if mspec['apply_wiener'] and filter_mode == 'wiener':
             cmb_alm_filtered, W_ell = fm.apply_wiener_filter(cmb_alm, mspec['nlkk'], lmax=nside)
             lensing_map = hp.alm2map(cmb_alm_filtered, nside=nside)
-            print('CMB map filtered with Wiener filter.')
+            print('[Data] CMB map filtered with Wiener filter.')
         elif filter_mode == 'gaussian' and smooth_value_deg > 0:
             lensing_map = hp.smoothing(hp.alm2map(cmb_alm, nside=nside), fwhm=np.radians(smooth_value_deg))
-            print(f'CMB map smoothed with Gaussian kernel of FWHM={smooth_value_deg:.1f} deg.')
+            print(f'[Data] CMB map smoothed with Gaussian kernel of FWHM={smooth_value_deg:.1f} deg.')
         else:
             lensing_map = hp.alm2map(cmb_alm, nside=nside)
-            print('CMB map without additional filtering applied.')
-    else:                                               # ACT: mapa ya Wiener-filtrado
+            print('[Data] CMB map without additional filtering applied.')
+    else:                                              
         lensing_map = hp.read_map(mspec['klm'])
-        nside = hp.get_nside(lensing_map)               # 512 (maximo del mapa)
-        print(f'Prefiltered map read (nside={nside}); no extra filtering applied.')
+        nside = hp.get_nside(lensing_map)           
+        print(f'Wiener prefiltered map read (nside={nside})')
 
-    # Suavizado gaussiano EXTRA por-mapa (sobre lo que ya tenga el mapa). Para ACT
-    # es Wiener(ya aplicado) + gaussiana. Se hace full-sky: como usamos solo el
-    # interior del footprint (corte de cobertura), el sangrado del borde no entra
-    # al stack. La mascara NO se suaviza (sigue siendo footprint binario).
     if sm_extra and sm_extra > 0:
         lensing_map = hp.smoothing(lensing_map, fwhm=np.radians(sm_extra / 60.0))
         print(f'Extra Gaussian smoothing applied: FWHM={sm_extra:.1f} arcmin.')
@@ -273,10 +252,8 @@ def _run_single_map(config):
     if hp.get_nside(common_mask) != nside:
         print(f'[mask] ud_grade {hp.get_nside(common_mask)} -> {nside}')
         common_mask = hp.ud_grade(common_mask, nside_out=nside)
-    common_mask = np.where(common_mask >= 0.9, 1.0, 0.0)   # footprint binario (umbral 0.9)
+    common_mask = np.where(common_mask >= 0.9, 1.0, 0.0)  
 
-    # Footprint usado para SELECCIONAR voids (por defecto el del propio mapa). Con
-    # coverage_map se usa el de otro mapa (p.ej. seleccionar en ACT y apilar en PR4).
     if cov_map_key:
         cspec = _map_spec(cov_map_key, data_folder)
         cov_mask = hp.read_map(cspec['mask'])
@@ -284,16 +261,15 @@ def _run_single_map(config):
             cov_mask = hp.ud_grade(cov_mask, nside_out=cspec['nside'])
         cov_mask = np.where(cov_mask >= 0.9, 1.0, 0.0)
         cov_nside, cov_frame = cspec['nside'], cspec['frame']
-        print(f'[footprint] seleccion de voids con el footprint de {cspec["label"]} '
-              f'(el stacking sigue sobre {map_label}).')
+        print(f'[footprint] Voids within the footprint of {cspec["label"]}')
     else:
         cov_mask, cov_nside, cov_frame = common_mask, nside, mspec['frame']
     print('')
 
     #%% Reading and selecting voids data
-    print(f'Reading {cat_label} voids catalogue...')
+    print(f'[Data] Reading {cat_label} voids catalogue...')
     n_seeds = config.get('N_seeds', None)
-    sample_lb_gal = None      # coords galacticas de la muestra final (para el panel de footprint)
+    sample_lb_gal = None
 
     def apply_delta_23_filter(df, delta_value):
         if delta_value is None:
@@ -304,7 +280,7 @@ def _run_single_map(config):
             return df[df['delta_23'] < delta_value]
 
     if n_seeds is not None:
-        print(f"Reading {n_seeds} voids catalogues identified with different random seeds...")
+        print(f"[Data] Reading {n_seeds} voids catalogues identified with different random seeds...")
         col_names = ['R_void', cat['lon_col'], cat['lat_col'], 'z', 'x', 'y', 'z_cart',
                      'delta_int', 'delta_23', 'completeness', 'delta_LOS']
         voids_data = {}
@@ -312,7 +288,7 @@ def _run_single_map(config):
         for seed in range(n_seeds):
             file_path = cat['seed_template'].format(seed + 1)
             df_seed = pd.read_csv(file_path, sep='\s+', names=col_names, header=None)
-            df_seed = _ensure_galactic(df_seed, cat)          # agrega l,b galácticas si es BOSS
+            df_seed = _ensure_galactic(df_seed, cat)
             voids_data[seed] = df_seed
 
             base_filter = (df_seed['z'] >= zmin) & (df_seed['z'] < zmax) & (df_seed['R_void'] >= rmin) & (df_seed['R_void'] <= rmax) & (df_seed['completeness'] > 1.9)
@@ -325,7 +301,7 @@ def _run_single_map(config):
                                             cov_frame, max_Rvoid)
                 fd = fd[cov >= min_cov].copy()
             final_data[seed] = fd
-        print('All voids data loaded.\n')
+        print('[Data] All voids data loaded.\n')
     else:
         col_names = ['R_void', cat['lon_col'], cat['lat_col'], 'z']
         voids_data_raw = pd.read_csv(cat['single_file'], sep='\s+', names=col_names, header=None)
@@ -343,11 +319,11 @@ def _run_single_map(config):
             final_data = final_data[cov >= min_cov].copy()
             print(f'[footprint] {map_label}: {len(final_data)}/{n0} voids con cobertura>={min_cov}.')
         sample_lb_gal = (final_data['l'].values, final_data['b'].values)
-        print(f'Total voids: {len(final_data)}')
-        print('Voids data loaded.\n')
+        print(f'[Data] Total voids: {len(final_data)}')
+        print('[Data] Voids data loaded.\n')
 
     #%% BINNING DATA
-    print(f'\nBinning data...')
+    print(f'\n[Data] Binning data...')
 
     if binning_mode == 'redshift': metric_col = 'z'
     elif binning_mode == 'radius': metric_col = 'R_void'
@@ -369,13 +345,11 @@ def _run_single_map(config):
             bins_info_list.append(info)
             print(f'Bin {i+1}: N={len(subset)}')
     else:
-        # Un único juego de bordes de cuantiles, compartido por todas las seeds y
-        # por el catálogo mergeado, para que el bin i cubra el mismo rango de z (o R).
         concat_all = pd.concat([final_data[s].assign(seed=s) for s in range(n_seeds)],
                                ignore_index=True)
 
         if do_merge:
-            print(f'Merging {n_seeds} seeds into a single catalogue (DBSCAN dedup)...')
+            print(f'[Data] Merging {n_seeds} seeds into a single catalogue...')
             merged_df, _ = vsm.merge_seeds(concat_all, eps_mpch=merge_eps_mpch,
                                            min_frac=merge_min_frac, n_seeds=n_seeds,
                                            use_catalog_xyz=merge_use_xyz)
@@ -396,7 +370,7 @@ def _run_single_map(config):
         _, bin_edges = pd.qcut(edge_src[metric_col], n_bins_quantile,
                              retbins=True, labels=False, duplicates='drop')
         bin_edges = np.asarray(bin_edges, dtype=float).copy()
-        bin_edges[0], bin_edges[-1] = -np.inf, np.inf          # sin bins NaN en los bordes
+        bin_edges[0], bin_edges[-1] = -np.inf, np.inf        
         n_bins_eff = len(bin_edges) - 1
 
         for s in range(n_seeds):
@@ -429,7 +403,7 @@ def _run_single_map(config):
             bins_info_list.append(entry)
 
     print(' ')
-    print(f'Binning completed.')
+    print(f'[Data] Binning completed.')
     print('')
 
     #%% LOOP PRINCIPAL
@@ -483,7 +457,6 @@ def _run_single_map(config):
             bin_id = entry['id']
             print(f"--- Processing Bin {bin_id+1} ---")
 
-            # ---- concatenación multi-seed (+ stacks por seed) --------------
             if do_concat:
                 seed_results = []
                 for seed in range(n_seeds):
@@ -516,7 +489,7 @@ def _run_single_map(config):
                     z_min_combined = np.nanmin([entry['seed_subsets'][s]['z_range'][0] for s in nonempty])
                     z_max_combined = np.nanmax([entry['seed_subsets'][s]['z_range'][1] for s in nonempty])
 
-                    print(f'Concatenated stack: {len(all_data_bin)} voids across {n_seeds} seeds')
+                    print(f'[Profiles] Concatenated stack: {len(all_data_bin)} voids across {n_seeds} seeds')
                     combined_cache_folder = os.path.join(stacks_cache_folder, 'combined')
                     os.makedirs(combined_cache_folder, exist_ok=True)
 
@@ -538,14 +511,13 @@ def _run_single_map(config):
                         })
                     all_results.append(result_combined)
 
-            # ---- catálogo único mergeado (DBSCAN) --------------------------
             if do_merge and entry.get('merged') and entry['merged']['coords'] is not None \
                     and len(entry['merged']['data']) > 0:
                 msub = entry['merged']
                 merged_cache_folder = os.path.join(stacks_cache_folder, 'merged')
                 os.makedirs(merged_cache_folder, exist_ok=True)
                 z_bin_min, z_bin_max = msub['z_range']
-                print(f'Merged stack: {len(msub["data"])} unique voids')
+                print(f'[Profiles] Merged stack: {len(msub["data"])} unique voids')
 
                 result_merged = pm.process_bin_stacking_parallel(release=release, mode=exec_mode,
                                                           z_min=z_bin_min, z_max=z_bin_max, r_min=rmin, r_max=rmax,
@@ -566,12 +538,11 @@ def _run_single_map(config):
                 all_results.append(result_merged)
 
     # SAVING
-    # mediana de R_void por muestra: se imprime y se guarda dentro de 'parameters' del .pkl.
     rvoid_summary = fm.build_rvoid_summary(all_results)
     parameters = dict(config)
     parameters['R_void_median_per_sample'] = rvoid_summary
 
-    print('Saving results...')
+    print('[Results] Saving results...')
 
     output_plot_path = os.path.join(run_folder, f'Stacked_Maps_NullTests_{file_suffix}.pdf')
     fm.plot_stacked_maps_and_profiles(all_results, output_plot_path, max_Rvoid)
@@ -601,15 +572,12 @@ def _run_single_map(config):
         pickle.dump({'results': all_results,
                      'parameters': parameters},
                      f)
-        print(f"Data saved in: {data_save_path}")
+        print(f"[Results] Data saved in: {data_save_path}")
 
     return _primary_result(all_results, map_label, sample_lb_gal)
 
 
 def _primary_result(all_results, map_label, sample_lb_gal=None):
-    """Resultado representativo (bin 0) de una corrida, para el panel comparativo.
-    Prioridad de catalogo: merged > concat > single. Adjunta las coords galacticas
-    de la muestra (para dibujar el footprint + voids)."""
     if not all_results:
         return None
     out = None
@@ -627,10 +595,10 @@ def _primary_result(all_results, map_label, sample_lb_gal=None):
     return out
 
 
-#%% Dispatcher: un mapa, un grupo (All_Planck/All), o act-pr4 + panel comparativo
+#%% Dispatcher
 def _save_comparison_panel(collected, config, tag, success_label, order):
     if len(collected) < 2:
-        print("[grupo] menos de 2 mapas con resultado; no genero panel comparativo.")
+        print("[Results] Less than 2 maps with results, skipping comparison plots")
         return
     data_folder = config['data_folder']
     cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
@@ -641,27 +609,23 @@ def _save_comparison_panel(collected, config, tag, success_label, order):
     cmp_path = os.path.join(out, fname)
     fm.plot_map_comparison(collected, cmp_path, config['max_Rvoid'],
                            success_label=success_label, order=order)
-    print(f"\n[grupo] panel comparativo guardado: {cmp_path}")
+    print(f"\n[Results] Comparison plot: {cmp_path}")
 
 
 def _run_act_vs_pr4(config):
-    """PR4 y ACT sobre EL MISMO conjunto de voids (los que entran en el footprint de
-    ACT). PR4 se apila en su mapa pero selecciona voids con el footprint de ACT
-    (coverage_map='ACT'); ACT usa su propio footprint (= el mismo). Asi la unica
-    diferencia entre ambas curvas es el survey/mapa, no la muestra ni el parche."""
-    print("\n######### act-pr4: PR4 vs ACT en el footprint de ACT #########")
-    pr4_label = 'PLANCK_PR4 (ACT fp)'
+    print("\n#########  PR4 vs ACT in the ACT footprint #########")
+    pr4_label = 'PLANCK_PR4'
     collected = {}
 
     cfg = dict(config); cfg['cmb_map'] = 'PLANCK_PR4'; cfg['coverage_map'] = 'ACT'
-    print("\n================= PR4 (footprint de ACT) =================")
+    print("\n================= PR4 =================")
     try:
         res = _run_single_map(cfg)
         if res is not None:
             res['map_label'] = pr4_label
             collected[pr4_label] = res
     except FileNotFoundError as e:
-        print(f"[act-pr4] PR4 salteado (archivo faltante): {e}")
+        print(f"[act-pr4] PR4 skipped (no file): {e}")
 
     cfg = dict(config); cfg['cmb_map'] = 'ACT'; cfg['coverage_map'] = None
     print("\n================= ACT =================")
@@ -670,13 +634,12 @@ def _run_act_vs_pr4(config):
         if res is not None:
             collected[res['map_label']] = res
     except FileNotFoundError as e:
-        print(f"[act-pr4] ACT salteado (archivo faltante): {e}")
+        print(f"[act-pr4] ACT skipped (no file): {e}")
 
     if len(collected) < 2:
-        print("[act-pr4] falta PR4 o ACT; no genero panel.")
+        print("[act-pr4] missing files.")
         return
 
-    # mascara de ACT (ecuatorial) para el panel de footprint (se muestra en galacticas)
     data_folder = config['data_folder']
     act_mask = hp.read_map(_map_spec('ACT', data_folder)['mask'])
     act_mask = np.where(act_mask >= 0.9, 1.0, 0.0)
@@ -689,7 +652,7 @@ def _run_act_vs_pr4(config):
     fm.plot_act_vs_pr4(collected, cmp_path, config['max_Rvoid'],
                        success_label=pr4_label, other_label='ACT',
                        footprint_mask=act_mask, footprint_coord='C')
-    print(f"\n[act-pr4] panel guardado: {cmp_path}")
+    print(f"\n[act-pr4] plot saved: {cmp_path}")
 
 
 def run_pipeline(config):
@@ -701,21 +664,21 @@ def run_pipeline(config):
         return
 
     if key not in MAP_GROUPS:
-        _run_single_map(config)                       # caso mapa unico (comportamiento previo)
+        _run_single_map(config)                      
         return
 
     keys = MAP_GROUPS[key]
     data_folder = config['data_folder']
-    print(f"\n######### GRUPO {key}: {len(keys)} mapas -> {keys} #########")
+    print(f"\n######### {key}: {len(keys)} maps -> {keys} #########")
 
     collected = {}
     for k in keys:
         cfg = dict(config); cfg['cmb_map'] = k
-        print(f"\n================= MAPA {k}  ({key}) =================")
+        print(f"\n================= MAP {k}  ({key}) =================")
         try:
             res = _run_single_map(cfg)
         except FileNotFoundError as e:
-            print(f"[grupo] '{k}' salteado (archivo faltante): {e}")
+            print(f"[Results] '{k}' skipped (no file): {e}")
             continue
         if res is not None:
             collected[res['map_label']] = res
