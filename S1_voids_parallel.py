@@ -135,6 +135,11 @@ def _run_single_map(config):
     mspec = _map_spec(config['cmb_map'], data_folder, config.get('act_smooth_arcmin', 0.0))
     map_label = mspec['label']
     release = map_label      # etiqueta usada en los nombres de cache (antes: config['release'])
+    # coverage_map: si se setea, la SELECCION de voids usa el footprint de OTRO mapa
+    # (p.ej. PR4 apilado pero seleccionando en el footprint de ACT). El stacking sigue
+    # sobre el mapa real. Solo se necesita su mascara.
+    cov_map_key = config.get('coverage_map', None)
+    cov_label = _map_spec(cov_map_key, data_folder)['label'] if cov_map_key else None
     pix_arcmin = hp.nside2resol(mspec['nside'], arcmin=True)
     box_deg_min = fm.get_angularsize_comoving(zmax, 2 * max_Rvoid * rmin)
     npix_cap = int(np.floor(box_deg_min * 60.0 / pix_arcmin))
@@ -203,7 +208,8 @@ def _run_single_map(config):
     base_suffix = (f'{mode_label}_{exec_mode}_'
                    f'{zmin}_{zmax}_{rmin}_{rmax}_'
                    f'maxRv{max_Rvoid:.1f}_{reso_rv_per_pix}Rvperpix_'
-                   f'{delta_label}_{filter_label}')
+                   f'{delta_label}_{filter_label}'
+                   + (f'_cov{cov_label}' if cov_label else ''))
     file_suffix = f'{cat_label}_{map_label}_{base_suffix}'
 
     run_folder = os.path.join(output_folder, file_suffix)
@@ -268,6 +274,20 @@ def _run_single_map(config):
         print(f'[mask] ud_grade {hp.get_nside(common_mask)} -> {nside}')
         common_mask = hp.ud_grade(common_mask, nside_out=nside)
     common_mask = np.where(common_mask >= 0.9, 1.0, 0.0)   # footprint binario (umbral 0.9)
+
+    # Footprint usado para SELECCIONAR voids (por defecto el del propio mapa). Con
+    # coverage_map se usa el de otro mapa (p.ej. seleccionar en ACT y apilar en PR4).
+    if cov_map_key:
+        cspec = _map_spec(cov_map_key, data_folder)
+        cov_mask = hp.read_map(cspec['mask'])
+        if hp.get_nside(cov_mask) != cspec['nside']:
+            cov_mask = hp.ud_grade(cov_mask, nside_out=cspec['nside'])
+        cov_mask = np.where(cov_mask >= 0.9, 1.0, 0.0)
+        cov_nside, cov_frame = cspec['nside'], cspec['frame']
+        print(f'[footprint] seleccion de voids con el footprint de {cspec["label"]} '
+              f'(el stacking sigue sobre {map_label}).')
+    else:
+        cov_mask, cov_nside, cov_frame = common_mask, nside, mspec['frame']
     print('')
 
     #%% Reading and selecting voids data
@@ -300,8 +320,8 @@ def _run_single_map(config):
             min_cov = config.get('min_footprint_coverage', 0.0)
             if min_cov and min_cov > 0 and len(fd):
                 cov = fm.footprint_coverage(fd['l'].values, fd['b'].values, fd['z'].values,
-                                            fd['R_void'].values, common_mask, nside,
-                                            mspec['frame'], max_Rvoid)
+                                            fd['R_void'].values, cov_mask, cov_nside,
+                                            cov_frame, max_Rvoid)
                 fd = fd[cov >= min_cov].copy()
             final_data[seed] = fd
         print('All voids data loaded.\n')
@@ -318,7 +338,7 @@ def _run_single_map(config):
             n0 = len(final_data)
             cov = fm.footprint_coverage(final_data['l'].values, final_data['b'].values,
                                         final_data['z'].values, final_data['R_void'].values,
-                                        common_mask, nside, mspec['frame'], max_Rvoid)
+                                        cov_mask, cov_nside, cov_frame, max_Rvoid)
             final_data = final_data[cov >= min_cov].copy()
             print(f'[footprint] {map_label}: {len(final_data)}/{n0} voids con cobertura>={min_cov}.')
         print(f'Total voids: {len(final_data)}')
@@ -361,7 +381,7 @@ def _run_single_map(config):
             if min_cov and min_cov > 0 and len(merged_df):
                 mcov = fm.footprint_coverage(merged_df['l'].values, merged_df['b'].values,
                                              merged_df['z'].values, merged_df['R_void'].values,
-                                             common_mask, nside, mspec['frame'], max_Rvoid)
+                                             cov_mask, cov_nside, cov_frame, max_Rvoid)
                 merged_df = merged_df[mcov >= min_cov].copy()
             edge_src = merged_df
         else:
@@ -595,21 +615,75 @@ def _primary_result(all_results, map_label):
     return out
 
 
-#%% Dispatcher: un mapa, o un grupo (All_Planck / All) + panel comparativo
+#%% Dispatcher: un mapa, un grupo (All_Planck/All), o act-pr4 + panel comparativo
+def _save_comparison_panel(collected, config, tag, success_label, order):
+    if len(collected) < 2:
+        print("[grupo] menos de 2 mapas con resultado; no genero panel comparativo.")
+        return
+    data_folder = config['data_folder']
+    cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
+    out = os.path.join(config['output_folder'], 'lensing')
+    fname = (f"MapComparison_{tag}_{cat_label}_{config['binning_mode']}_"
+             f"{config['n_bins']}bins_{config['zmin']}_{config['zmax']}_"
+             f"{config['rmin']}_{config['rmax']}.pdf")
+    cmp_path = os.path.join(out, fname)
+    fm.plot_map_comparison(collected, cmp_path, config['max_Rvoid'],
+                           success_label=success_label, order=order)
+    print(f"\n[grupo] panel comparativo guardado: {cmp_path}")
+
+
+def _run_act_vs_pr4(config):
+    """PR4 y ACT sobre EL MISMO conjunto de voids (los que entran en el footprint de
+    ACT). PR4 se apila en su mapa pero selecciona voids con el footprint de ACT
+    (coverage_map='ACT'); ACT usa su propio footprint (= el mismo). Asi la unica
+    diferencia entre ambas curvas es el survey/mapa, no la muestra ni el parche."""
+    print("\n######### act-pr4: PR4 vs ACT en el footprint de ACT #########")
+    pr4_label = 'PLANCK_PR4 (ACT fp)'
+    collected = {}
+
+    cfg = dict(config); cfg['cmb_map'] = 'PLANCK_PR4'; cfg['coverage_map'] = 'ACT'
+    print("\n================= PR4 (footprint de ACT) =================")
+    try:
+        res = _run_single_map(cfg)
+        if res is not None:
+            res['map_label'] = pr4_label
+            collected[pr4_label] = res
+    except FileNotFoundError as e:
+        print(f"[act-pr4] PR4 salteado (archivo faltante): {e}")
+
+    cfg = dict(config); cfg['cmb_map'] = 'ACT'; cfg['coverage_map'] = None
+    print("\n================= ACT =================")
+    try:
+        res = _run_single_map(cfg)
+        if res is not None:
+            collected[res['map_label']] = res
+    except FileNotFoundError as e:
+        print(f"[act-pr4] ACT salteado (archivo faltante): {e}")
+
+    _save_comparison_panel(collected, config, tag='ACTvsPR4',
+                           success_label=pr4_label, order=[pr4_label, 'ACT'])
+
+
 def run_pipeline(config):
     req = str(config.get('cmb_map', 'PLANCK_PR4'))
-    if req.upper() not in MAP_GROUPS:
+    key = req.upper().replace('-', '_')
+
+    if key == 'ACT_PR4':
+        _run_act_vs_pr4(config)
+        return
+
+    if key not in MAP_GROUPS:
         _run_single_map(config)                       # caso mapa unico (comportamiento previo)
         return
 
-    keys = MAP_GROUPS[req.upper()]
+    keys = MAP_GROUPS[key]
     data_folder = config['data_folder']
-    print(f"\n######### GRUPO {req.upper()}: {len(keys)} mapas -> {keys} #########")
+    print(f"\n######### GRUPO {key}: {len(keys)} mapas -> {keys} #########")
 
     collected = {}
     for k in keys:
         cfg = dict(config); cfg['cmb_map'] = k
-        print(f"\n================= MAPA {k}  ({req.upper()}) =================")
+        print(f"\n================= MAPA {k}  ({key}) =================")
         try:
             res = _run_single_map(cfg)
         except FileNotFoundError as e:
@@ -618,21 +692,10 @@ def run_pipeline(config):
         if res is not None:
             collected[res['map_label']] = res
 
-    if len(collected) < 2:
-        print("[grupo] menos de 2 mapas con resultado; no genero panel comparativo.")
-        return
-
-    cat_label = _catalog_spec(config.get('void_catalog', 'WH'), data_folder)['label']
-    out = os.path.join(config['output_folder'], 'lensing')
-    tag = 'AllPlanck' if req.upper() == 'ALL_PLANCK' else 'All'
-    fname = (f"MapComparison_{tag}_{cat_label}_{config['binning_mode']}_"
-             f"{config['n_bins']}bins_{config['zmin']}_{config['zmax']}_"
-             f"{config['rmin']}_{config['rmax']}.pdf")
-    cmp_path = os.path.join(out, fname)
+    tag = 'AllPlanck' if key == 'ALL_PLANCK' else 'All'
     order = [_map_spec(k, data_folder)['label'] for k in keys]
-    fm.plot_map_comparison(collected, cmp_path, config['max_Rvoid'],
+    _save_comparison_panel(collected, config, tag=tag,
                            success_label='PLANCK_PR4', order=order)
-    print(f"\n[grupo] panel comparativo guardado: {cmp_path}")
 
 
 if __name__ == "__main__":
