@@ -106,7 +106,7 @@ config = {
     'merge_use_catalog_xyz': False,       # con la cosmología de Websky recomputar == catálogo
 
     'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 30.0, 'rmax': 70.0,
+    'rmin': 35.0, 'rmax': 70.0,
 
     'max_Rvoid': 2.5,
     'Rvoid_bin': 0.14,
