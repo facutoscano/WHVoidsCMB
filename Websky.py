@@ -106,7 +106,7 @@ config = {
     'merge_use_catalog_xyz': False,       # con la cosmología de Websky recomputar == catálogo
 
     'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 35.0, 'rmax': 70.0,
+    'rmin': 30.0, 'rmax': 70.0,
 
     'max_Rvoid': 2.5,
     'Rvoid_bin': 0.14,
@@ -130,8 +130,12 @@ config = {
     'force_rerun': True,
 
     # ---------------- Comparación con datos (opcional) ----------------
-    # Ruta a un Data_FullRun_*.pkl de la corrida de datos (mismo max_Rvoid y Rvoid_bin).
+    # Data_FullRun_*.pkl de la corrida de datos, o la CARPETA que lo contiene
+    # (mismo max_Rvoid y Rvoid_bin).
     'compare_data_pkl': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/WH_PLANCK_PR4_redshift_1bins_errors_0.1_0.5_35.0_70.0_maxRv2.5_0.02Rvperpix_d23_all_wiener',
+    # True -> NO corre nada: lee los Data_FullRun_*.pkl de Websky ya guardados para
+    # esta selección (cada filter_mode pedido) y sólo hace la comparación.
+    'compare_only': True,
 }
 
 PIPELINE_COLS = ['R_void', 'l', 'b', 'z', 'x', 'y', 'z_cart',
@@ -372,7 +376,53 @@ def _pick(results, prefer=('merged', 'concat', 'single')):
     return results[0]
 
 
+def _resolve_pkl(path):
+    """Acepta el .pkl o la carpeta de la corrida (busca Data_FullRun_*.pkl adentro)."""
+    if os.path.isdir(path):
+        found = sorted(glob.glob(os.path.join(path, 'Data_FullRun_*.pkl')))
+        if len(found) != 1:
+            raise FileNotFoundError(f"{path}: {len(found)} archivos Data_FullRun_*.pkl (se espera 1)")
+        return found[0]
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    return path
+
+
+def _filter_from_folder(name):
+    """Sufijo de filtro que pone S1 en el nombre de la carpeta -> filter_mode."""
+    if name.endswith('_wiener'):
+        return 'wiener'
+    if name.endswith('_no_filter'):
+        return 'none'
+    if '_gaussian_' in name:
+        return 'gaussian'
+    return None
+
+
+def load_saved_websky(cfg):
+    """Resultados de Websky ya guardados por S1 para la selección del config."""
+    lens = os.path.join(cfg['output_folder'], 'lensing')
+    wanted = cfg['filter_mode'] if isinstance(cfg['filter_mode'], (list, tuple)) else [cfg['filter_mode']]
+    sel = (f"WEBSKY_{map_label(cfg)}_{cfg['binning_mode']}_{cfg['n_bins']}bins_{cfg['exec_mode']}_"
+           f"{cfg['zmin']}_{cfg['zmax']}_{cfg['rmin']}_{cfg['rmax']}_maxRv{cfg['max_Rvoid']:.1f}_")
+    results = {}
+    for d in sorted(glob.glob(os.path.join(lens, sel + '*'))):
+        fmode = _filter_from_folder(os.path.basename(d))
+        if fmode not in wanted or not os.path.isdir(d):
+            continue
+        if fmode in results:
+            print(f"[compare] (!) más de una corrida '{fmode}' para esta selección; uso {os.path.basename(d)}")
+        with open(_resolve_pkl(d), 'rb') as f:
+            results[fmode] = _pick(pickle.load(f)['results'])
+        print(f"[compare] Websky [{fmode}] <- {os.path.basename(d)}")
+    if not results:
+        raise FileNotFoundError(f"No hay corridas de Websky guardadas que empiecen con\n  {os.path.join(lens, sel)}")
+    return results
+
+
 def compare_with_data(ws_results, data_pkl, out_path, max_Rvoid):
+    data_pkl = _resolve_pkl(data_pkl)
+    print(f"[compare] datos <- {data_pkl}")
     with open(data_pkl, 'rb') as f:
         dd = pickle.load(f)
     dres, dpar = _pick(dd['results']), dd.get('parameters', {})
@@ -451,6 +501,14 @@ def main(cfg=config):
 
     lens_out = os.path.join(cfg['output_folder'], 'lensing')
     os.makedirs(lens_out, exist_ok=True)
+    out_cmp = os.path.join(lens_out, f"WebskyVsData_{map_label(cfg)}_{cfg['zmin']}_{cfg['zmax']}_"
+                                     f"{cfg['rmin']}_{cfg['rmax']}.pdf")
+    if cfg.get('compare_only'):
+        if not cfg.get('compare_data_pkl'):
+            raise ValueError("compare_only=True necesita 'compare_data_pkl'")
+        compare_with_data(load_saved_websky(cfg), cfg['compare_data_pkl'], out_cmp, cfg['max_Rvoid'])
+        return None
+
     sys.stdout = DualLogger(os.path.join(lens_out, 'websky_run.log'))
     print("### PIPELINE RUN: WEBSKY VOIDS x WEBSKY KAPPA ###")
     with open(os.path.join(lens_out, 'Websky_pipeline_config.json'), 'w') as f:
@@ -483,9 +541,7 @@ def main(cfg=config):
 
     if cfg.get('compare_data_pkl'):
         print("\n>>> Comparación con datos")
-        out = os.path.join(lens_out, f"WebskyVsData_{map_label(cfg)}_{cfg['zmin']}_{cfg['zmax']}_"
-                                     f"{cfg['rmin']}_{cfg['rmax']}.pdf")
-        compare_with_data(results, cfg['compare_data_pkl'], out, cfg['max_Rvoid'])
+        compare_with_data(results, cfg['compare_data_pkl'], out_cmp, cfg['max_Rvoid'])
 
     with open(os.path.join(lens_out, 'SUCCESS_websky'), 'w') as f:
         f.write('Done.')
