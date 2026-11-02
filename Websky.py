@@ -98,7 +98,7 @@ config = {
 
     # ---------------- Pipeline (mismas claves que Pipeline_voids.py) ----------------
     'min_footprint_coverage': 0.9,
-    'N_seeds': 100,                      # None -> single_file | int -> seed_glob
+    'N_seeds': None,                      # None -> single_file | int -> seed_glob
     'delta_value': None,
     'seed_mode': 'merge',
     'merge_eps_mpch': 8.0,
@@ -437,6 +437,7 @@ def compare_with_data(ws_results, data_pkl, out_path, max_Rvoid):
                 label=f"Datos {dpar.get('cmb_map', '?')} [{d_filter}] (N={dres.get('n_voids', '?')}, "
                       f"med Rv={dres.get('R_void_median', np.nan):.1f})")
     colors = {'wiener': 'xkcd:crimson', 'none': 'xkcd:steel blue', 'gaussian': 'xkcd:teal'}
+    chi_txt = []
 
     for fmode, res in ws_results.items():
         if res is None:
@@ -470,7 +471,16 @@ def compare_with_data(ws_results, data_pkl, out_path, max_Rvoid):
             pte = np.nan
         print(f"[compare] datos vs Websky [{fmode}]: chi2={chi2:.1f} / {p} bins "
               f"(Hartlap={hart:.2f}, PTE={pte:.3f})  -- indicativo: cov JK + randoms")
+        chi_txt.append(rf"$\chi^2$ (datos vs Websky [{fmode}]) = {chi2:.1f} / {p} bins"
+                       f"\nPTE = {pte:.3f}   (Hartlap h = {hart:.2f}; cov JK + randoms)")
 
+    if chi_txt:
+        ax.text(0.03, 0.96, "\n".join(chi_txt), transform=ax.transAxes, fontsize=9,
+                va='top', ha='left',
+                bbox=dict(boxstyle='round', facecolor='white', edgecolor='0.7', alpha=0.9))
+    else:
+        ax.text(0.03, 0.96, f"sin chi2: ninguna corrida de Websky con filter_mode='{d_filter}'",
+                transform=ax.transAxes, fontsize=9, color='0.4', va='top')
     for y in (-2, 2):
         axr.axhline(y, color='gray', ls='--', alpha=0.7)
     axr.axhline(0, color='k', alpha=0.5); axr.set_ylim(-5, 5)
