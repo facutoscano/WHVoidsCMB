@@ -91,7 +91,7 @@ config = {
 
     # ---------------- Websky: mapas (relativos a websky_folder) ----------------
     'kappa_file':     'CMB/kap.fits',
-    'act_noise_map':  'kappa_niall_foreground_wsky_WF.fits',   # ACT-like sin lensing (ya filtrado, en C)
+    'act_noise_map':  'CMB/kappa_niall_foreground_wsky_WF.fits',   # ACT-like sin lensing (ya filtrado, en C)
     'act_native_mode': 'auto',                 # 'auto' | 'identity' | 'rotate' (ver docstring)
     'tsz_check_map':  'CMB/tsz_2048.fits',     # usado por 'auto' (además del kappa de Websky)
     # ---------------- Planck: ruido y filtro (relativo a data_folder) ----------------
