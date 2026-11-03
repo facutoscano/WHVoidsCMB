@@ -49,8 +49,8 @@ config = {
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); 
                                         # True  -> use catalogue x,y,z_cart
     
-    'zmin': 0.25, 'zmax': 0.7,            
-    'rmin': 40.0, 'rmax': 70.0,         
+    'zmin': 0.1, 'zmax': 0.5,            
+    'rmin': 35.0, 'rmax': 70.0,         
 
     
     # Geometric setup
