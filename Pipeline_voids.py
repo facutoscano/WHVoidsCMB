@@ -32,7 +32,7 @@ config = {
                                         #  'act-pr4' (PR4 vs ACT, ACT footprint)
     
     'min_footprint_coverage': 0.9,      # voids which disk max_Rvoid*Rv is min_footprint_coverage*100 within the mask
-    'void_catalog': 'WH',               # 'WH' (Wen&Han --> galactic l,b) or 'BOSS' (BOSS --> equatorial ra,dec)
+    'void_catalog': 'BOSS',               # 'WH' (Wen&Han --> galactic l,b) or 'BOSS' (BOSS --> equatorial ra,dec)
     'N_seeds': 100,                     # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     
@@ -49,8 +49,8 @@ config = {
     'merge_use_catalog_xyz': False,     # False -> recompute comoving xyz from (l,b,z); 
                                         # True  -> use catalogue x,y,z_cart
     
-    'zmin': 0.3, 'zmax': 0.5,            
-    'rmin': 30.0, 'rmax': 70.0,         
+    'zmin': 0.1, 'zmax': 0.5,            
+    'rmin': 20.0, 'rmax': 30.0,         
 
     
     # Geometric setup
