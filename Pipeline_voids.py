@@ -22,7 +22,7 @@ config = {
 
 
     # Data selection
-    'cmb_map': 'act-pr4',               # one map: 
+    'cmb_map': 'All_Planck',               # one map: 
                                         # 'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIB' |
                                         # 'PLANCK_SZ'  | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # full analysis:
@@ -32,7 +32,7 @@ config = {
                                         #  'act-pr4' (PR4 vs ACT, ACT footprint)
     
     'min_footprint_coverage': 0.9,      # voids which disk max_Rvoid*Rv is min_footprint_coverage*100 within the mask
-    'void_catalog': 'BOSS',               # 'WH' (Wen&Han --> galactic l,b) or 'BOSS' (BOSS --> equatorial ra,dec)
+    'void_catalog': 'WH',               # 'WH' (Wen&Han --> galactic l,b) or 'BOSS' (BOSS --> equatorial ra,dec)
     'N_seeds': 100,                     # Number of random seeds used to identify voids.
                                         # If None, it uses the simplest void catalog without random seeds. Nmax = 100
     

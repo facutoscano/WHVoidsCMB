@@ -64,7 +64,7 @@ def _map_spec(cmb_map, data_folder, act_smooth_arcmin=0.0):
                        'mask': f'{L}/Common_mask_Lensing_2048.fits',
                        'nlkk': nlkk_pr3},
         'PLANCK_CIB': {'label': 'PLANCK_CIB', 'kind': 'alm', 'frame': 'galactic',
-                       'nside': 2048, 'full_sky': True, 'apply_wiener': True,
+                       'nside': 2048, 'full_sky': True, 'apply_wiener': False,
                        'klm':  f'{L}/CIBdeproj/dat_klm_MV.fits',
                        'mask': f'{L}/CIBdeproj/mask.fits',
                        'nlkk': nlkk_pr3},                  
