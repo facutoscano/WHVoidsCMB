@@ -89,7 +89,7 @@ config.update({
     'data_results':  '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/',   # para 'auto'
 
     # ---------------- Qué correr ----------------
-    'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'BOTH'
+    'void_catalogs': 'BOTH',                     # 'WH' | 'BOSS' | 'BOTH'
     'surveys': ['FULL', 'PR4', 'ACT', 'ACT-PR4'],
 
     # ---------------- Websky: catálogo ----------------
@@ -108,7 +108,7 @@ config.update({
     'tsz_check_map':  'CMB/tsz_2048.fits',     # usado por 'auto' (además del kappa de Websky)
     # ---------------- Planck: ruido y filtro (relativo a data_folder) ----------------
     'pr4_noise_file': 'CMB/PLANCK/Lensing/nlkk_PR4_MV.dat',       # (L, N_L, C_L+N_L): ruido + Wiener
-    'noise_seed':     0,
+    'noise_seed':     100,
     'nside':          2048,
     'lmax':           2048,
     'map2alm_iter':   1,

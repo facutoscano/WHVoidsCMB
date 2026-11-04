@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'All_Planck',            # one map:
+    'cmb_map': 'ACT-PR4',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
@@ -32,7 +32,7 @@ config = {
                                         #   'ACT-PR4'    (PR4 vs ACT on the ACT x PR4 footprint)
     'common_coverage': True,            # groups: select voids on the intersection of all the masks
 
-    'void_catalog': 'WH',               # 'WH' (Wen & Han) | 'BOSS' | 'BOTH' (both + comparison in columns)
+    'void_catalog': 'BOTH',               # 'WH' (Wen & Han) | 'BOSS' | 'BOTH' (both + comparison in columns)
     'N_seeds': 100,                     # number of Sparkling seed catalogues (None = single catalogue)
     'seed_mode': 'merge',               # 'concat' | 'merge' (DBSCAN single catalogue) | 'both'
     'merge_eps_mpch': 8.0,              # DBSCAN linking length [Mpc/h]
@@ -41,7 +41,7 @@ config = {
 
     'delta_value': None,                # None: no cut | v>=0: delta_23 > v | v<0: delta_23 < v
     'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h
+    'rmin': 25.0, 'rmax': 70.0,         # Mpc/h
 
     'min_footprint_coverage': 0.9,      # a void (and a random) is kept if >= 90% of its
                                         # max_Rvoid*Rv disc lies inside the coverage region
@@ -71,14 +71,14 @@ config = {
     'bkg_mode': 'randoms',              # 'randoms'       : net = P - <P_randoms>
                                         # 'outer'         : net = P - mean(P, r/Rv in bkg_outer)
                                         # 'randoms+outer' : both
-    'bkg_outer': (2.0, 2.5),            # r/R_v range used by 'outer'
+    'bkg_outer': (2.5, 3.0),            # r/R_v range used by 'outer'
 
     # ---------------- Cluster ----------------
     'n_workers': 120,                   # worker processes (None = all cores)
 
     # ---------------- Step control ----------------
     'run_step_1': True,
-    'force_rerun': False,               # True: ignore the stacking cache
+    'force_rerun': True,               # True: ignore the stacking cache
 }
 
 
