@@ -1,117 +1,83 @@
-#%% IMPORTS
+"""
+null_test_plots.py
+==================
+Visual check of the two null tests on the selection of Pipeline_voids.py:
+  1. rings of max_Rvoid*R_v around the voids (overlap of the stamps);
+  2. rotated catalogues (longitude shifts) over the coverage region;
+  3. three random realizations as drawn by the pipeline (same footprint and
+     coverage criterion as the voids).
+    python null_test_plots.py
+"""
+
 import os
-import sys
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import healpy as hp
-import pandas as pd
-from astropy.cosmology import Planck18
+
 import Functions_module as fm
+import S1_voids_parallel as s1
+from Pipeline_voids import config as PIPELINE_CONFIG
 
-#%% Configuration
-config = {
-    'data_folder': '/home/ftoscano/Doctorado/Data/',
-    'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
-    'release': 'PR4',
-    'zmin': 0.2, 'zmax': 0.65,
-    'rmin': 35.0, 'rmax': 62.7,
-    'max_Rvoid': 2.5,
-    'nside': 2048,
-    'nside_plot': 2048 
-}
+config = dict(PIPELINE_CONFIG)
+config.update({'cmb_map': 'PLANCK_PR4', 'void_catalog': 'WH', 'coverage_map': None, 'nside_plot': 512})
 
-def main():
-    print("Diagnostic plots")
-    data_folder = config['data_folder']
-    output_folder = config['output_folder']
-    nside = config['nside']
-    nside_plot = config['nside_plot']
-    
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
 
-    #%% Loading data and masks
-    print("Loading data and masks...")
-    col_names = ['R_void', 'l', 'b', 'z']
-    voids_data = pd.read_csv(f'{data_folder}CATALOGOS/WenHan_voids.dat', sep='\s+', names=col_names, header=None)
-    
-    mask_cat = (voids_data['z'] >= config['zmin']) & (voids_data['z'] < config['zmax']) & \
-               (voids_data['R_void'] >= config['rmin']) & (voids_data['R_void'] < config['rmax'])
-    cat_final = voids_data[mask_cat].copy()
-    
-    l_v = cat_final['l'].values
-    b_v = cat_final['b'].values
-    z_v = cat_final['z'].values
-    rv_v = cat_final['R_void'].values
-    n_voids = len(cat_final)
-    print(f"Number of voids: {n_voids}")
+def main(cfg=config):
+    out_dir = os.path.join(cfg['output_folder'], 'Plots')
+    os.makedirs(out_dir, exist_ok=True)
+    df_ = cfg['data_folder']
+    cat = s1._catalog_spec(cfg['void_catalog'], df_)
+    ns_cov = cfg['coverage_nside']
+    cov_frac, labels = s1._coverage_region(s1._coverage_keys(cfg, cfg['cmb_map']), df_, ns_cov)
+    region = np.where(cov_frac >= 0.5, 1.0, 0.0)
+    F = fm.survey_footprint(cat.get('footprint'), df_, ns_cov,
+                            os.path.join(cfg['output_folder'], 'lensing', 'Cache_Stacks', 'footprints'),
+                            label=cat['label']) if cfg.get('random_pool', 'footprint') == 'footprint' else None
+    if F is not None:
+        region = region * F
+    S = s1.load_void_samples(cfg, cat, cov_frac)
+    import pandas as pd
+    v = S['merged'] if S['merged'] is not None else (S['single'] if S['single'] is not None
+                                                      else pd.concat(S['per_seed'].values()))
+    l, b, z, rv = v['l'].values, v['b'].values, v['z'].values, v['R_void'].values
+    tag = f"{cat['label']}_{'+'.join(labels)}_N{len(v)}"
+    nsp = cfg['nside_plot']
 
-    common_mask_file = f'{data_folder}CMB/Lensing/Common_mask_Lensing_2048.fits'
-    common_mask = hp.read_map(common_mask_file)
-    survey_mask = fm.footprint_mask(l_v, b_v, output_nside=nside, footprint_nside=32)
-    effective_mask = common_mask * survey_mask
+    rings = np.zeros(hp.nside2npix(nsp))
+    for i in range(len(v)):
+        th = fm.get_angularsize_comoving(z[i], cfg['max_Rvoid'] * rv[i])
+        vec = hp.ang2vec(l[i], b[i], lonlat=True)
+        out = hp.query_disc(nsp, vec, np.radians(th))
+        inn = hp.query_disc(nsp, vec, np.radians(max(0.001, th - 0.15)))
+        rings[np.setdiff1d(out, inn)] += 1
+    rings[rings == 0] = hp.UNSEEN
+    hp.mollview(rings, title=f"r = {cfg['max_Rvoid']} Rv  ({tag})", cmap='turbo', min=1)
+    plt.savefig(os.path.join(out_dir, f'Null_1_rings_{tag}.png'), dpi=200, bbox_inches='tight'); plt.close('all')
 
-    eff_mask_plot = hp.ud_grade(effective_mask, nside_out=nside_plot)
-    
-    #%% PLOT 1
-    print("Generating Plot 1: Angular Overlap...")
-    map_rings = np.zeros(hp.nside2npix(nside_plot))
-    
-    for i in range(n_voids):
-        box_size_mpch = config['max_Rvoid'] * rv_v[i]
-        theta_deg = fm.get_angularsize_comoving(z_v[i], box_size_mpch)
-        
-        vec = hp.ang2vec(l_v[i], b_v[i], lonlat=True)
-        theta_in_deg = max(0.001, theta_deg - 0.1) 
-        
-        pix_out = hp.query_disc(nside_plot, vec, radius=np.radians(theta_deg))
-        pix_in = hp.query_disc(nside_plot, vec, radius=np.radians(theta_in_deg))
-        
-        boundary = np.setdiff1d(pix_out, pix_in)
-        map_rings[boundary] += 1
+    covp = hp.ud_grade(np.where(cov_frac >= 0.5, 1.0, 0.0), nsp)
+    plt.figure(figsize=(12, 8))
+    for i, ang in enumerate([0, 90, 180, 270]):
+        hp.mollview(covp, sub=(2, 2, i + 1), title=f'longitude shift {ang} deg', cbar=False, cmap='Blues')
+        hp.projscatter((l - ang) % 360, b, lonlat=True, s=0.5, color='red', alpha=0.5)
+    plt.savefig(os.path.join(out_dir, f'Null_2_rotations_{tag}.png'), dpi=200, bbox_inches='tight'); plt.close('all')
 
-    map_rings[map_rings == 0] = hp.UNSEEN
-
-    plt.figure(figsize=(10, 6))
-    hp.mollview(map_rings, title=f"r = {config['max_Rvoid']} R_v", 
-                cmap='turbo', return_projected_map=False, min=1)
-    plt.savefig(os.path.join(output_folder, "Diag_1_Void_Overlap_Rings.pdf"), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    #%% PLOT 2
-    print("Generating Plot 2: Rotation Test...")
-    rot_angles = [90, 180, 270, 360]
-    
-    fig = plt.figure(figsize=(12, 8))
-    for i, ang in enumerate(rot_angles):
-        rot_mask = fm.rotate_map(eff_mask_plot, rot_angles=[ang, 0, 0])
-        
-        hp.mollview(rot_mask, sub=(2, 2, i+1), 
-                    title=f"Rotation in Longitude: {ang}º", 
-                    cbar=False, cmap='Blues')
-        
-        hp.projscatter(l_v, b_v, lonlat=True, s=0.5, color='red', alpha=0.5)
-
-    plt.savefig(os.path.join(output_folder, "Diag_2_Rotations_Test.pdf"), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    #%% PLOT 3
-    print("Generating Plot 3: Random Point Distribution...")
-    fig = plt.figure(figsize=(12, 8))
-    
-    
-    hp.mollview(eff_mask_plot, sub=(2, 2, 1), title="Footprint Mask", cbar=False, cmap='Greys')
-    
+    regp = hp.ud_grade(region, nsp)
+    plt.figure(figsize=(12, 8))
+    hp.mollview(regp, sub=(2, 2, 1), title='random-centre region', cbar=False, cmap='Greys')
+    hp.projscatter(l, b, lonlat=True, s=0.5, color='red', alpha=0.6)
     for i in range(3):
-        rand_l, rand_b = fm.generate_random(effective_mask, n_voids, nside)
-        
-        hp.mollview(eff_mask_plot, sub=(2, 2, i+2), title=f"Random realization {i+1}", cbar=False, cmap='Greys')
-        hp.projscatter(rand_l, rand_b, lonlat=True, s=0.5, color='blue', alpha=0.5)
+        rng = np.random.default_rng(1000 + i)
+        perm = rng.permutation(len(z))
+        rl, rb, _, _, nsw = fm.matched_randoms(z[perm], rv[perm], region, cov_frac, cfg['max_Rvoid'],
+                                               cfg.get('min_footprint_coverage', 0.0), rng)
+        hp.mollview(regp, sub=(2, 2, i + 2), title=f'random realization {i + 1} (swaps={nsw})',
+                    cbar=False, cmap='Greys')
+        hp.projscatter(rl, rb, lonlat=True, s=0.5, color='blue', alpha=0.6)
+    plt.savefig(os.path.join(out_dir, f'Null_3_randoms_{tag}.png'), dpi=200, bbox_inches='tight'); plt.close('all')
+    print(f'[null plots] saved in {out_dir}')
 
-    plt.savefig(os.path.join(output_folder, "Diag_3_Random_Distributions.pdf"), dpi=300, bbox_inches='tight')
-    plt.close()
 
-    print(f"Done! All the plots are saved in {output_folder}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

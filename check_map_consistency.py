@@ -1,33 +1,30 @@
 """
-check_CIB_deproj.py
-===================
-¿Por qué el stack de voids con la reconstrucción CIB-deproyectada da ~la mitad que
-PR3/PR4 (en WH y en BOSS)? Tres hipótesis, que este script separa:
+check_map_consistency.py
+========================
+Consistency of the Planck lensing products used in the pipeline, relative to a
+reference reconstruction (PR3):
 
-  (1) RUIDO: el mapa CIB-deproj es más ruidoso y la caída es una fluctuación.
-  (2) NORMALIZACIÓN: el klm CIB-deproj tiene otra normalización (señal global ~0.5x).
-  (3) CONTAMINACIÓN: los mapas estándar llevan un sesgo de CIB alrededor de los voids
-      que el CIB-deproj no tiene.
+  PLANCK_PR4, PLANCK_PR3, PLANCK_inhom, PLANCK_SZ, PLANCK_SZ_deproj : quadratic
+      estimators (unbiased kappa, Wiener-filtered by the pipeline).
+  PLANCK_CIBcomb : COM_Lensing-CIBcomb_2000_R3.00, lensing tracer built from the MV
+      quadratic estimator AND the GNILC 545 GHz CIB map. Already filtered (L in [8,2000]);
+      it is NOT a CIB-deprojected reconstruction, so its amplitude relative to PR3 is
+      its transfer function, not a contamination test.
 
-TEST 0  ¿Los mapas de datos llevan el corte de L de sus espectros?
-        Fracción de potencia en L fuera de [8,400] (Planck) y [40,763] (ACT). Si es
-        apreciable, el corte NO está en el mapa (sólo en el likelihood del espectro).
+TEST 0  Is the L range of the likelihood present in the maps? Fraction of (2L+1)C_L
+        outside [8,400] (Planck) and [40,763] (ACT).
 
-TEST A  Normalización global con un trazador independiente: densidad de cúmulos WH (g).
-        Para cada mapa X:  A_X - 1 = C_L(d x g) / C_L(ref x g),  con d = kappa_X - kappa_ref.
-        Usar la DIFERENCIA cancela el ruido común a ambas reconstrucciones (mismos datos CMB);
-        el error de Knox usa C_L(d x d), o sea el ruido propio de la diferencia.
-        A_X ~ 1  ->  descarta (2).
+TEST A  Relative transfer with an independent tracer (WH cluster overdensity g):
+        A_X - 1 = C_L(d x g) / C_L(ref x g),  d = kappa_X - kappa_ref (raw alm, no filter).
+        The difference cancels the noise common to both reconstructions; the Knox error
+        uses C_L(d x d). A_X ~ 1 for unbiased reconstructions.
 
-TEST B  Específico de voids: mapa diferencia FILTRADO (cada mapa con su propio Wiener,
-        como en S1),  D = W_X*kappa_X - W_ref*kappa_ref,  apilado con S1 en los MISMOS
-        voids que la corrida de datos. Randoms sobre D = ruido exacto de la diferencia.
-        chi2 de D contra 0 (cov de randoms):
-          compatible con 0           -> (1) fluctuación
-          significativo y A_X ~ 1    -> (3) contaminación alrededor de voids
+TEST B  Stack, on the voids of the pipeline, of the difference of the maps as the
+        pipeline uses them (each with its effective filter):
+        D = F_X kappa_X - F_ref kappa_ref, with randoms on D -> chi2 against 0.
 
-Uso (desde la carpeta de la pipeline, toma la selección de voids de Pipeline_voids.config):
-    python check_CIB_deproj.py
+Usage (from the pipeline folder; void selection from Pipeline_voids.config):
+    python check_map_consistency.py
 """
 
 import os
@@ -46,10 +43,10 @@ import S1_voids_parallel as s1
 import Pipeline_voids as PV          # sólo para copiar su config (no corre nada al importar)
 
 config = {
-    'out_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/checks/CIB/',
+    'out_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/checks/maps/',
     'ref':        'PLANCK_PR3',                       # referencia (mismo pipeline Planck 2018)
-    'maps_A':     ['PLANCK_CIB', 'PLANCK_SZ', 'PLANCK_SZ_DEPROJ', 'PLANCK_INHOM', 'PLANCK_PR4'],
-    'map_B':      'PLANCK_CIB',                       # el que se diferencia y apila en el test B
+    'maps_A':     ['PLANCK_CIBCOMB', 'PLANCK_SZ', 'PLANCK_SZ_DEPROJ', 'PLANCK_INHOM', 'PLANCK_PR4'],
+    'map_B':      'PLANCK_CIBCOMB',                   # map differenced and stacked in test B
 
     # ---- test 0 ----
     'run_test0': True,
@@ -67,7 +64,7 @@ config = {
     'run_testB':  True,
     'nside_B':    2048,
     # selección de voids: la de Pipeline_voids.config (se pisan sólo estas claves)
-    'pipeline_overrides': {'void_catalog': 'WH', 'random_pool': 'full'},
+    'pipeline_overrides': {'void_catalog': 'WH'},
 }
 
 
@@ -181,70 +178,66 @@ def testA(cfg, df):
         ax.errorbar(Lc, [x[3] for x in r], yerr=[x[4] for x in r], fmt='o-', capsize=3, label=k)
     ax.axhline(1, color='k', ls='--'); ax.axhline(0.5, color='gray', ls=':')
     ax.set_xscale('log'); ax.set_xlabel('L'); ax.set_ylabel(rf"$A_X = C_L^{{\kappa_X g}}/C_L^{{\kappa_{{ref}} g}}$")
-    ax.set_title(f"Normalización relativa a {cfg['ref']} (cruce con cúmulos WH)"); ax.legend(fontsize=8)
+    ax.set_title(f"Transfer relative to {cfg['ref']} (cross with WH clusters)"); ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     out = os.path.join(cfg['out_folder'], 'testA_amplitud_vs_cumulos.pdf')
     fig.savefig(out, bbox_inches='tight'); plt.close(fig)
     print(f"[A] figura: {out}")
-    print("[A] A~1 en 40<L<400 => normalización OK (descarta hipótesis 2). A~0.5 => normalización.")
+    print("[A] A~1 for unbiased reconstructions; for PLANCK_CIBcomb A_X(L) is its transfer function.")
 
 
 # ----------------------------------------------------------------------
-def _filtered_map(spec, nside):
-    alm, l0 = _read_klm(spec['klm'])
-    if spec.get('apply_wiener') and spec.get('nlkk'):
-        alm, _ = fm.apply_wiener_filter(alm, spec['nlkk'], lmax=nside)
-    return hp.alm2map(alm, nside=nside)
-
-
 def testB(cfg, df):
-    print("\n=== TEST B: stack del mapa diferencia filtrado en los voids ===")
+    print("\n=== TEST B: stack of the filtered difference map on the voids ===")
     ns = cfg['nside_B']
     X, R = cfg['map_B'], cfg['ref']
     sx, sr = s1._map_spec(X, df), s1._map_spec(R, df)
-    if sx['nlkk'] != sr['nlkk']:
-        print(f"[B] nota: {X} y {R} usan distinto nlkk -> se filtra cada uno con el suyo antes de restar")
+    pcfg = dict(PV.config)
+    fx, fr = s1._effective_filter(sx, pcfg)[0], s1._effective_filter(sr, pcfg)[0]
+    print(f"[B] {sx['label']} ({fx}) - {sr['label']} ({fr})")
     label = f"DIFF_{sx['label'].replace('PLANCK_', '')}_minus_{sr['label'].replace('PLANCK_', '')}"
     mdir = os.path.join(cfg['out_folder'], 'maps'); os.makedirs(mdir, exist_ok=True)
     dpath, mpath = os.path.join(mdir, f"{label}_ns{ns}.fits"), os.path.join(mdir, f"{label}_mask_ns{ns}.fits")
     if not os.path.exists(dpath):
-        D = _filtered_map(sx, ns) - _filtered_map(sr, ns)
+        mx, nx, _ = s1._load_map(sx, pcfg)
+        mr, nr, _ = s1._load_map(sr, pcfg)
+        D = (hp.ud_grade(mx, ns) if nx != ns else mx) - (hp.ud_grade(mr, ns) if nr != ns else mr)
         hp.write_map(dpath, D.astype(np.float32), overwrite=True, dtype=np.float32)
         M = _mask(sx['mask'], ns) * _mask(sr['mask'], ns)
         hp.write_map(mpath, M.astype(np.float32), overwrite=True, dtype=np.float32)
-        print(f"[B] mapa diferencia -> {dpath}")
+        print(f"[B] difference map -> {dpath}")
 
     orig = s1._map_spec
     spec = {'label': label, 'kind': 'map', 'frame': 'galactic', 'nside': ns, 'full_sky': True,
-            'apply_wiener': False, 'klm': dpath, 'mask': mpath, 'nlkk': None}
+            'prefiltered': True, 'klm': dpath, 'mask': mpath, 'nlkk': None}
     s1._map_spec = lambda k, d, a=0.0: dict(spec) if str(k).upper() == label.upper() else orig(k, d, a)
-    c = dict(PV.config)
+    c = dict(pcfg)
     c.update(cfg['pipeline_overrides'])
-    c.update(cmb_map=label, coverage_map=None, output_folder=os.path.join(cfg['out_folder'], ''))
-    res = s1._run_single_map(c)
-    s1._map_spec = orig
+    c.update(cmb_map=label, coverage_map=[X, R], coverage_tag='XxRef',
+             output_folder=os.path.join(cfg['out_folder'], ''))
+    try:
+        res = s1._run_single_map(c)
+    finally:
+        s1._map_spec = orig
     if res is None:
-        print("[B] (!) S1 no devolvió resultado"); return
+        print("[B] (!) S1 returned no result"); return
 
-    import Websky as W                     # reutiliza chi2 con cov de randoms y su figura
-    ch = W.chi2_test({'res': res})
-    print(f"[B] {label} contra 0: {ch['msg']}")
-    W.plot_chi2(ch, os.path.join(cfg['out_folder'], f"testB_chi2_{label}.pdf"),
-                f"{label} apilado en voids, contra 0 | cov de randoms")
+    ch = fm.chi2_profile(res)
+    print(f"[B] {label} against 0: {ch['msg']}")
+    fm.plot_chi2(ch, os.path.join(cfg['out_folder'], f"testB_chi2_{label}.pdf"),
+                 f"{label} stacked on voids, against 0 | randoms covariance")
     r = np.asarray(res['r_frac'])
-    net, sig = W._net(res)
+    ns_ = fm.net_signal(res)
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.fill_between(r, -sig * 1e3, sig * 1e3, color='gray', alpha=0.3, label=r'$1\sigma$ randoms')
-    ax.errorbar(r, net * 1e3, yerr=sig * 1e3, fmt='o-', color='xkcd:crimson', capsize=3,
-                label=f"{X} − {R}  (N={res.get('n_voids', '?')})")
+    ax.fill_between(r, -ns_['band'] * 1e3, ns_['band'] * 1e3, color='gray', alpha=0.3, label=r'$1\sigma$ randoms')
+    ax.errorbar(r, ns_['net'] * 1e3, yerr=ns_['err'] * 1e3, fmt='o-', color='xkcd:crimson', capsize=3,
+                label=f"{X} - {R}  (N={res.get('n_voids', '?')})")
     ax.axhline(0, color='k', ls=':'); ax.axvline(1, color='gray', ls='--')
     ax.set_xlabel(r'$r/R_v$'); ax.set_ylabel(r'$\Delta\kappa_{\rm net}\;[10^{-3}]$'); ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     out = os.path.join(cfg['out_folder'], f"testB_profile_{label}.pdf")
     fig.savefig(out, bbox_inches='tight'); plt.close(fig)
-    print(f"[B] figura: {out}")
-    print("[B] PTE alto => la caída del CIB-deproj es ruido (hipótesis 1). PTE bajo => diferencia real: "
-          "mirar test A para distinguir normalización (2) de contaminación (3).")
+    print(f"[B] figure: {out}")
 
 
 def main(cfg=config):

@@ -4,8 +4,10 @@ Websky.py
 Voids identificados en Websky  x  kappa de Websky, con EXACTAMENTE la misma pipeline
 que los datos (S1_voids_parallel._run_single_map -> Parallel_module -> Functions_module).
 Se registra 'WEBSKY' como catálogo y como mapa dentro de S1 y se llama a su
-_run_single_map: selección, cobertura, merge, binneado, stacking, JK, nulls, caché y
-plots son el mismo código que corre sobre los datos.
+_run_single_map: selección, cobertura, merge, binneado, stacking, JK, randoms en el
+footprint, resta de fondo, caché y plots son el mismo código que corre sobre los datos.
+El config hereda el de Pipeline_voids.py (mismos cortes y ajustes que los datos); acá
+sólo se agregan/pisan las claves propias de Websky.
 
 CONVENCIÓN DE COORDENADAS
     Voids y kap.fits de Websky comparten el frame nativo de la simulación (mismos ejes
@@ -19,31 +21,39 @@ CONVENCIÓN DE COORDENADAS
                                            'auto'     -> se decide correlacionando el mapa
                                                          de Niall con kappa y tSZ de Websky
                                                          bajo ambas hipótesis.
-    Voids y mapas se rotan con la MISMA matriz (healpy Rotator G->C).
+    Voids y mapas se rotan con la MISMA matriz (healpy Rotator G->C). Para S1 todo se
+    declara 'galactic' (identidad): S1 no rota nada.
 
-VOIDS ('void_catalogs': 'WH' | 'BOSS' | 'WH-BOSS')
+VOIDS ('void_catalogs': 'WH' | 'BOSS' | 'BOTH')
     Siempre los mismos voids de Websky; el catálogo elige qué footprint se copia:
     se conservan los voids con >= footprint_min_cov de su disco de footprint_rv_frac*Rv
     dentro del footprint (equivalente a la completeness de Sparkling en los datos).
-    'WH-BOSS' corre ambos y los compara.
+    Ese mismo footprint es la región donde S1 tira los randoms.
+    'BOTH' corre ambos y agrega figuras en columnas (WH | BOSS).
 
 CORRIDAS ('surveys': cualquier subconjunto de 'FULL', 'PR4', 'ACT', 'ACT-PR4')
     FULL     raw_FULL       kappa puro (sin ruido ni filtro), cielo completo, todos los voids
     PR4      raw_PR4        kappa puro, máscara PR4
              obsPR4_PR4     kappa + ruido N_L^PR4 + Wiener PR4, máscara PR4   (= datos WH x PR4)
-    ACT      raw_ACT        kappa puro, máscara ACT (cobertura de voids en ACT)
-             noiseACT_ACT   mapa de Niall: foregrounds + reconstrucción ACT, SIN lensing
-                            -> sesgo de foregrounds y nivel real de ruido de ACT
-    ACT-PR4  obsPR4_ACTPR4  kappa + ruido PR4 + Wiener PR4, voids con cobertura en ACT
-                            (= datos en modo 'act-pr4' de S1)
-    Las corridas en ACT son de cielo parcial (sin rotaciones), como ACT en los datos.
+    ACT      raw_ACT        kappa puro, máscara ACT
+             noiseACT_ACT   mapa de Niall: foregrounds de Websky pasados por la reconstrucción
+                            y el filtro de ACT, SIN lensing -> sesgo de foregrounds de ACT.
+                            No tiene ruido de reconstrucción (sigma_rand ~3% de los datos ACT).
+    ACT-PR4  obsPR4_ACTPR4  kappa + ruido PR4 + Wiener PR4 en el footprint ACT
+    Las tres corridas en el footprint de ACT usan la cobertura ACT x PR4 (los mismos voids,
+    igual que el modo 'ACT-PR4' de los datos). Las de cielo parcial no tienen rotaciones.
+    No hay predicción del perfil de ACT con lensing (haría falta kappa de Websky por el
+    filtro y el ruido de ACT): raw_ACT es la geometría, noiseACT_ACT el sesgo de foregrounds.
 
-COMPARACIÓN CON DATOS ('compare_data'[catálogo][survey] = Data_FullRun_*.pkl o su carpeta)
+COMPARACIÓN CON DATOS ('compare_data'[catálogo][survey] = 'auto' | pkl | carpeta | None)
+    'auto' busca en data_results la corrida de datos con la misma selección:
+      PR4     -> PLANCK_PR4, cobertura propia
+      ACT-PR4 -> PLANCK_PR4, cobertura ACTxPR4 (modo 'ACT-PR4' de Pipeline_voids)
+      ACT     -> ACT,        cobertura ACTxPR4 (modo 'ACT-PR4' de Pipeline_voids)
     PR4, ACT-PR4: datos vs obsPR4 -> perfiles + figura aparte de chi2 (cov de randoms).
-    ACT:          datos ACT vs noiseACT (+ raw_ACT de referencia) + cociente de ruidos
-                  sigma_rand(Websky ACT sin lensing)/sigma_rand(datos ACT) + chi2 de
-                  noiseACT contra 0 (¿el sesgo de foregrounds es compatible con nulo?).
-    Las barras de estas figuras son sigma de randoms (la misma cov que el chi2).
+    ACT:          datos ACT vs noiseACT (+ raw_ACT de referencia), sigma_rand(Niall)/sigma_rand(datos)
+                  y chi2 de noiseACT contra 0 (¿el sesgo de foregrounds es compatible con nulo?).
+    Con 'BOTH' las figuras de comparación tienen una columna por catálogo.
 
 Uso:  python Websky.py      (desde la carpeta de los módulos de la pipeline)
 """
@@ -68,16 +78,18 @@ from astropy import units as u
 import Functions_module as fm
 import void_seed_merge as vsm
 import S1_voids_parallel as s1
+from Pipeline_voids import config as PIPELINE_CONFIG
 
 
-#%% Config
-config = {
-    'data_folder':   '/home/ftoscano/Doctorado/Data/',
+#%% Config  (= Pipeline_voids.config + claves de Websky)
+config = dict(PIPELINE_CONFIG)
+config.update({
     'websky_folder': '/home/ftoscano/Doctorado/Data/MOCKS/Websky_data/',
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/websky/',
+    'data_results':  '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/',   # para 'auto'
 
     # ---------------- Qué correr ----------------
-    'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'WH-BOSS'
+    'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'BOTH'
     'surveys': ['FULL', 'PR4', 'ACT', 'ACT-PR4'],
 
     # ---------------- Websky: catálogo ----------------
@@ -91,15 +103,13 @@ config = {
 
     # ---------------- Websky: mapas (relativos a websky_folder) ----------------
     'kappa_file':     'CMB/kap.fits',
-    'act_noise_map':  'CMB/kappa_niall_foreground_wsky_WF.fits',   # ACT-like sin lensing (ya filtrado, en C)
+    'act_noise_map':  'CMB/kappa_niall_foreground_wsky_WF.fits',   # fg ACT sin lensing (filtrado WF, en C)
     'act_native_mode': 'auto',                 # 'auto' | 'identity' | 'rotate' (ver docstring)
     'tsz_check_map':  'CMB/tsz_2048.fits',     # usado por 'auto' (además del kappa de Websky)
     # ---------------- Planck: ruido y filtro (relativo a data_folder) ----------------
-    # 3 columnas (L, N_L, C_L+N_L): N_L para el ruido gaussiano y el MISMO archivo para el
-    # Wiener que aplica S1 (idéntico a los datos).
-    'pr4_noise_file': 'CMB/PLANCK/Lensing/nlkk_PR4_MV.dat',
+    'pr4_noise_file': 'CMB/PLANCK/Lensing/nlkk_PR4_MV.dat',       # (L, N_L, C_L+N_L): ruido + Wiener
     'noise_seed':     0,
-    'nside':          2048,                    # nside de las corridas de alm (PR4 y raw)
+    'nside':          2048,
     'lmax':           2048,
     'map2alm_iter':   1,
     'deconvolve_pixwin': False,
@@ -111,8 +121,6 @@ config = {
         'ACT': {'path': 'CMB/ACT/mask_act_dr6_baseline_ns512.fits',           'coord': 'C'},
     },
     'footprint_sources': {
-        # 'points': ocupación HEALPix (nside) de posiciones (cols lon/lat, 'frame' icrs|galactic)
-        # 'healpix': máscara ya hecha ('coord': 'G' | 'C')
         'WH':   {'kind': 'points', 'path': 'CATALOGOS/WenHan_Clusters.dat',
                  'cols': (2, 3), 'frame': 'icrs', 'skiprows': 56, 'n_files': None, 'nside': 64},
         'BOSS': {'kind': 'points', 'path': 'CATALOGOS/BOSS_voids_merge/voids_boss_{:03d}.dat',
@@ -122,52 +130,18 @@ config = {
     'footprint_rv_frac': 1.0,
     'footprint_min_cov': 0.95,
 
-    # ---------------- Pipeline (mismas claves que Pipeline_voids.py) ----------------
-    'min_footprint_coverage': 0.9,
-    'N_seeds': 100,
-    'delta_value': None,
-    'seed_mode': 'merge',
-    'merge_eps_mpch': 8.0,
-    'merge_min_frac': 0.4,
-    'merge_use_catalog_xyz': False,
-
-    'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 35.0, 'rmax': 70.0,
-
-    'max_Rvoid': 2.5,
-    'Rvoid_bin': 0.14,
-    'npix_stamp': 400,
-    'smooth_value_arcmin': 0.0,
-    'act_smooth_arcmin': 0.0,
-
-    'binning_mode': 'redshift',
-    'n_bins': 1,
-
-    'exec_mode': 'errors',
-    'n_subsamples': 60,
-    'n_rand_factor': 300,
-    'n_rotations': 10,
-    'random_pool': 'full',
-    'random_excl_factor': None,
-
-    'n_workers': 120,
-    'force_rerun': True,
-
     # ---------------- Comparación con datos ----------------
-    # Data_FullRun_*.pkl o la carpeta que lo contiene; None = no comparar ese caso.
-    # 'ACT-PR4' = corrida de datos PR4 en el footprint de ACT (carpeta ..._wiener_covACT).
     'compare_data': {
-        'WH':   {'PR4': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/'
-                        'WH_PLANCK_PR4_redshift_1bins_errors_0.1_0.5_35.0_70.0_maxRv2.5_0.02Rvperpix_d23_all_wiener',
-                 'ACT': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/WH_ACT_redshift_1bins_errors_0.1_0.5_35.0_70.0_maxRv2.5_0.08Rvperpix_d23_all_prefiltered', 'ACT-PR4': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/WH_PLANCK_PR4_redshift_1bins_errors_0.1_0.5_35.0_70.0_maxRv2.5_0.02Rvperpix_d23_all_wiener_covACT'},
-        'BOSS': {'PR4': None, 'ACT': None, 'ACT-PR4': None},
+        'WH':   {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
+        'BOSS': {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
     },
     'compare_only': False,                     # True: no corre nada, lee lo guardado y compara
-}
+})
 
 NATIVE_FRAME = 'G'                             # Websky: cielo completo en galácticas
 SURVEY_FRAME = {'FULL': 'G', 'PR4': 'G', 'ACT': 'C', 'ACT-PR4': 'C'}
-COV_KEY = 'WEBSKY_COV'                         # clave de coverage_map para S1
+COV_KEYS = {'ACT': 'WEBSKY_COV_ACT', 'PR4': 'WEBSKY_COV_PR4'}   # claves de coverage_map para S1
+ACT_COV_TAG = 'ACTxPR4'
 PIPELINE_COLS = ['R_void', 'l', 'b', 'z', 'x', 'y', 'z_cart',
                  'delta_int', 'delta_23', 'completeness', 'delta_LOS']
 WEBSKY_COSMO = FlatLambdaCDM(H0=68.0, Om0=0.31, Ob0=0.049, Tcmb0=0.0, name='Websky')
@@ -179,7 +153,7 @@ RUN_NAMES = {
     'raw_ACT':       'κ puro, cobertura ACT',
     'obsPR4_PR4':    'κ como PR4 (ruido + Wiener)',
     'obsPR4_ACTPR4': 'κ como PR4 en cobertura ACT',
-    'noiseACT_ACT':  'ACT sin lensing (fg + ruido)',
+    'noiseACT_ACT':  'fg ACT sin lensing (filtro ACT)',
 }
 RUN_COLORS = {
     'raw_FULL': 'xkcd:black', 'raw_PR4': 'xkcd:steel blue', 'raw_ACT': 'xkcd:teal',
@@ -210,11 +184,11 @@ def set_cosmology(kind):
 
 #%% Definición de corridas
 def catalogs_of(cfg):
-    vc = cfg['void_catalogs'].upper()
-    if vc == 'WH-BOSS':
+    vc = str(cfg['void_catalogs']).upper()
+    if vc in ('BOTH', 'WH-BOSS'):
         return ['WH', 'BOSS']
     if vc not in ('WH', 'BOSS'):
-        raise ValueError(f"void_catalogs desconocido: {cfg['void_catalogs']}")
+        raise ValueError(f"void_catalogs desconocido: {cfg['void_catalogs']} (WH | BOSS | BOTH)")
     return [vc]
 
 
@@ -237,6 +211,7 @@ def build_runs(cfg):
                          footprint=True))
     for r in runs:
         r['full_sky'] = r['mask'] != 'ACT'          # cielo parcial ACT: sin rotaciones (como en datos)
+        r['act_cov'] = r['survey'] in ('ACT', 'ACT-PR4')  # cobertura común ACT x PR4 (mismos voids)
         r['frame'] = SURVEY_FRAME[r['survey']]
     return runs
 
@@ -253,12 +228,6 @@ def map_label(cfg, run):
     if cfg['cosmology'] != 'websky':
         lab += f"_cosmo{cfg['cosmology']}"
     return lab
-
-
-def filter_label(run):
-    """Sufijo de filtro que S1 pone en la carpeta (+ _cov<label> si hay coverage_map)."""
-    f = {'raw': 'no_filter', 'obsPR4': 'wiener', 'noiseACT': 'prefiltered'}[run['field']]
-    return f + ('_covACTmask' if run['cov'] == 'ACT' else '')
 
 
 #%% Máscaras y footprints en el frame de Websky
@@ -316,14 +285,18 @@ def _footprint_points(src, cfg, frame):
             lon, lat = c.ra.degree, c.dec.degree
     print(f"[footprint]   {len(lon)} posiciones de {os.path.basename(files[0])}"
           f"{' (+%d archivos)' % (len(files) - 1) if len(files) > 1 else ''}")
-    return fm.footprint_mask(lon, lat, output_nside=cfg['footprint_nside'], footprint_nside=src['nside'])
+    occ = np.zeros(hp.nside2npix(src['nside']))
+    occ[hp.ang2pix(src['nside'], lon, lat, lonlat=True)] = 1.0
+    occ = fm.fill_small_holes(occ)                   # mismo criterio que S1 (fm.survey_footprint)
+    F = hp.ud_grade(occ, nside_out=cfg['footprint_nside'])
+    return np.where(F > 0, 1.0, 0.0)
 
 
 def build_footprint(cfg, cat, frame, maps_dir):
     path = os.path.join(maps_dir, f"footprint_{cat}_in{frame}_ns{cfg['footprint_nside']}.fits")
     if os.path.exists(path) and not cfg.get('force_map', False):
         print(f"[footprint] {cat} ({frame}): cacheado {os.path.basename(path)}")
-        return hp.read_map(path, dtype=np.float64)
+        return hp.read_map(path, dtype=np.float64), path
     src = cfg['footprint_sources'][cat]
     print(f"[footprint] {cat} en {frame} ({src['kind']})")
     if src['kind'] == 'points':
@@ -333,7 +306,7 @@ def build_footprint(cfg, cat, frame, maps_dir):
         F = (hp.ud_grade(_to_frame(m, src.get('coord', 'G'), frame), cfg['footprint_nside']) > 0.5).astype(float)
     hp.write_map(path, F.astype(np.float32), overwrite=True, dtype=np.float32)
     print(f"[footprint] {cat} ({frame}): fsky={F.mean():.3f} ({F.mean() * 41253:.0f} deg2)")
-    return F
+    return F, path
 
 
 def plot_geometry(F, mask_files, out_png, title):
@@ -429,9 +402,8 @@ def rotate_voids(df, frame):
 def _footprint_cut(df, F, cfg, label, cat):
     if F is None or len(df) == 0:
         return df
-    cov = fm.footprint_coverage(df['l'].values, df['b'].values, df['z'].values,
-                                df['R_void'].values, F, cfg['footprint_nside'], 'galactic',
-                                max_Rvoid=cfg['footprint_rv_frac'])
+    cov = fm.disc_coverage(df['l'].values, df['b'].values, df['z'].values,
+                           df['R_void'].values, F, cfg['footprint_rv_frac'])
     keep = cov >= cfg['footprint_min_cov']
     print(f"[footprint] {label}: {keep.sum()}/{len(df)} voids dentro de {cat}")
     return df[keep]
@@ -601,8 +573,10 @@ def decide_act_rotation(cfg, niall_path, act_mask_path, raw_alm_path):
 
 
 #%% Registro de WEBSKY en S1
-def install_websky(cat_spec, map_spec, cov_spec=None):
+def install_websky(cat_spec, map_spec, cov_specs=None):
+    """S1 ve 'WEBSKY' como catálogo y como mapa; cov_specs = {clave: spec de máscara}."""
     orig_cat, orig_map = _ORIG_SPECS
+    cov_specs = {k.upper(): v for k, v in (cov_specs or {}).items()}
 
     def _cat(catalog, data_folder):
         if str(catalog).upper() == 'WEBSKY':
@@ -613,11 +587,15 @@ def install_websky(cat_spec, map_spec, cov_spec=None):
         key = str(cmb_map).upper()
         if key == 'WEBSKY':
             return dict(map_spec)
-        if key == COV_KEY and cov_spec is not None:
-            return dict(cov_spec)
+        if key in cov_specs:
+            return dict(cov_specs[key])
         return orig_map(cmb_map, data_folder, act_smooth_arcmin)
 
     s1._catalog_spec, s1._map_spec = _cat, _map
+
+
+def uninstall_websky():
+    s1._catalog_spec, s1._map_spec = _ORIG_SPECS
 
 
 #%% Resultados guardados
@@ -640,166 +618,98 @@ def _pick(results, prefer=('merged', 'concat', 'single')):
     return results[0]
 
 
-def _sel_prefix(cfg):
-    return (f"{cfg['binning_mode']}_{cfg['n_bins']}bins_{cfg['exec_mode']}_"
-            f"{cfg['zmin']}_{cfg['zmax']}_{cfg['rmin']}_{cfg['rmax']}_maxRv{cfg['max_Rvoid']:.1f}_")
+def _index_path(cfg):
+    return os.path.join(cfg['output_folder'], 'lensing', f"websky_runs_index_{_sel_tag(cfg)}.json")
 
 
 def load_saved_websky(cfg, runs, cats):
-    """{(cat|'ALL', run_key): {'res','pkl','label','filter','run'}}"""
-    lens = os.path.join(cfg['output_folder'], 'lensing')
+    """{(cat|'ALL', run_key): {'res','pkl','run'}} desde el índice que escribe main()."""
+    idx_path = _index_path(cfg)
+    if not os.path.exists(idx_path):
+        print(f"[load] (!) no existe {idx_path}: correr primero con compare_only=False")
+        return {}
+    with open(idx_path) as f:
+        index = json.load(f)
     out = {}
     for run in runs:
         for cat in (cats if run['footprint'] else [None]):
-            lab, filt = map_label(cfg, run), filter_label(run)
-            pre = f"{cat_label(cat)}_{lab}_{_sel_prefix(cfg)}"
-            cands = [d for d in glob.glob(os.path.join(lens, pre + '*'))
-                     if os.path.isdir(d) and d.endswith('_' + filt)]
             key = (cat or 'ALL', run['key'])
-            if not cands:
-                print(f"[load] (!) sin corrida guardada para {key}: {pre}*_{filt}")
+            pkl = index.get('|'.join(key))
+            if not pkl or not os.path.exists(pkl):
+                print(f"[load] (!) sin corrida guardada para {key}")
                 continue
-            d = max(cands, key=os.path.getmtime)
-            pkl = _resolve_pkl(d)
             with open(pkl, 'rb') as f:
                 res = _pick(pickle.load(f)['results'])
-            out[key] = {'res': res, 'pkl': pkl, 'label': lab, 'filter': filt.split('_cov')[0], 'run': run}
-            print(f"[load] {key} <- {os.path.basename(d)}")
+            out[key] = {'res': res, 'pkl': pkl, 'run': run}
+            print(f"[load] {key} <- {os.path.basename(os.path.dirname(pkl))}")
     return out
 
 
-def _folder_filter(pkl):
-    """Filtro de la corrida a partir del nombre de la carpeta de S1."""
-    name = os.path.basename(os.path.dirname(pkl))
-    m = re.search(r'_d23_(?:all|gt[\d.]+|lt[\d.]+)_(.+?)(?:_cov[^_]+)?$', name)
-    return m.group(1) if m else '*'
+#%% Datos
+_SEL_KEYS = ('zmin', 'zmax', 'rmin', 'rmax', 'max_Rvoid', 'Rvoid_bin', 'binning_mode', 'n_bins',
+             'delta_value', 'N_seeds', 'seed_mode', 'merge_eps_mpch', 'merge_min_frac',
+             'min_footprint_coverage', 'random_pool', 'bkg_mode')
+_DATA_TARGET = {'PR4': ('PLANCK_PR4', ''), 'ACT-PR4': ('PLANCK_PR4', ACT_COV_TAG), 'ACT': ('ACT', ACT_COV_TAG)}
 
 
-def _null_rand_profiles(pkl_path, res, release, filt):
-    """Perfiles de randoms cacheados por Parallel_module (null_tests_*.npz), si existen."""
-    if not pkl_path:
+def _same(a, b):
+    if isinstance(a, (list, tuple)) or isinstance(b, (list, tuple)):
+        return list(a or []) == list(b or [])
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= 1e-9 * max(1.0, abs(b))
+    return a == b
+
+
+def find_data_run(cfg, cat, survey):
+    """Data_FullRun_*.pkl de datos con la misma selección que Websky (más reciente)."""
+    map_label, cov_tag = _DATA_TARGET[survey]
+    best = None
+    for pkl in glob.glob(os.path.join(cfg['data_results'], '*', 'Data_FullRun_*.pkl')):
+        try:
+            with open(pkl, 'rb') as f:
+                par = pickle.load(f).get('parameters', {})
+        except Exception:
+            continue
+        if par.get('catalog_label') != cat or par.get('map_label') != map_label:
+            continue
+        if (par.get('coverage_tag') or '') != cov_tag:
+            continue
+        if not all(_same(par.get(k), cfg.get(k)) for k in _SEL_KEYS):
+            continue
+        if best is None or os.path.getmtime(pkl) > os.path.getmtime(best):
+            best = pkl
+    if best is None:
+        print(f"[compare] (!) no hay corrida de datos {cat} x {map_label}"
+              f"{' (cov ' + cov_tag + ')' if cov_tag else ''} con la misma selección en {cfg['data_results']}")
+    return best
+
+
+def _load_data(path):
+    pkl = _resolve_pkl(path)
+    with open(pkl, 'rb') as f:
+        dd = pickle.load(f)
+    return {'res': _pick(dd['results']), 'pkl': pkl, 'par': dd.get('parameters', {})}
+
+
+def _data_for(cfg, cat, survey):
+    spec = ((cfg.get('compare_data') or {}).get(cat) or {}).get(survey)
+    if not spec:
         return None
-    root = os.path.join(os.path.dirname(os.path.dirname(pkl_path)), 'Cache_Stacks')
-    pat = os.path.join(root, '**', f"null_tests_{release}_{res.get('key')}_*_N{res.get('n_voids')}_"
-                                    f"*_{filt}_maxRv*.npz")
-    found = glob.glob(pat, recursive=True)
-    if not found:
+    path = find_data_run(cfg, cat, survey) if spec == 'auto' else spec
+    if not path:
         return None
-    f = max(found, key=os.path.getmtime)
-    try:
-        R = np.asarray(np.load(f)['null_profiles_rand'], float)
-        print(f"[chi2] randoms cacheados: {os.path.relpath(f, root)} ({len(R)} perfiles)")
-        return R if R.ndim == 2 and len(R) > 1 else None
-    except Exception as e:
-        print(f"[chi2] no pude leer {f}: {e}")
-        return None
-
-
-#%% Estadística
-def _cov_rand(res):
-    """cov del perfil neto según randoms: cov_cmb * (1 + 1/N_rand)."""
-    C, nr = res.get('cov_cmb'), int(res.get('n_randoms_done', 0) or 0)
-    if C is None or nr < 2:
-        return None, nr
-    return np.asarray(C, float) * (1.0 + 1.0 / nr), nr
-
-
-def _net(res):
-    net, _, _ = fm._net_and_err(res)
-    C, _ = _cov_rand(res)
-    sig = np.sqrt(np.diag(C)) if C is not None else np.full_like(net, np.nan)
-    return np.asarray(net), sig
-
-
-def chi2_test(a, b=None, rand_a=None, rand_b=None):
-    """
-    chi2 de (net_a - net_b) [o net_a contra 0 si b es None] con C = C_a + C_b (randoms).
-    a, b: dict(res=..., pkl=..., release=..., filter=...).
-    """
-    na, _ = _net(a['res'])
-    Ca, nra = _cov_rand(a['res'])
-    if Ca is None:
-        raise ValueError("sin cov_cmb (¿n_rand_factor=0?)")
-    if b is not None:
-        nb, _ = _net(b['res'])
-        Cb, nrb = _cov_rand(b['res'])
-        C = Ca + (Cb if Cb is not None else 0.0)
-        N = min(nra, nrb) if Cb is not None else nra
-        delta = na - nb
-    else:
-        C, N, delta = Ca, nra, na
-    good = np.isfinite(delta) & np.isfinite(np.diag(C))
-    p = int(good.sum())
-    h = (N - p - 2) / (N - 1)
-    Cg, dg = C[np.ix_(good, good)], delta[good]
-    w, V = np.linalg.eigh(Cg)
-    if w.min() <= 0:
-        print(f"[chi2] (!) covarianza no definida positiva (min autovalor={w.min():.2e}); uso pinv")
-    Cinv = np.linalg.pinv(Cg)
-    chi2 = float(h * dg @ Cinv @ dg)
-    from scipy.stats import chi2 as _chi2
-    pte = float(_chi2.sf(chi2, p))
-    order = np.argsort(w)[::-1]
-    contrib = h * (V[:, order].T @ dg) ** 2 / w[order]
-
-    emp = None
-    Ra = _null_rand_profiles(a.get('pkl'), a['res'], a.get('release', '*'), a.get('filter', '*'))
-    if Ra is not None:
-        dd = Ra[:, good] - np.nanmean(Ra[:, good], 0)
-        if b is not None:
-            Rb = _null_rand_profiles(b.get('pkl'), b['res'], b.get('release', '*'), b.get('filter', '*'))
-            if Rb is not None:
-                n = min(len(Ra), len(Rb))
-                dd = dd[:n] - (Rb[:n, good] - np.nanmean(Rb[:, good], 0))
-        dd = dd[np.all(np.isfinite(dd), axis=1)]
-        emp = h * np.einsum('ki,ij,kj->k', dd, Cinv, dd)
-    out = {'chi2': chi2, 'p': p, 'h': h, 'N_rand': N, 'pte': pte, 'eig': w[order],
-           'contrib': contrib, 'emp': emp,
-           'pte_emp': None if emp is None else float((np.sum(emp >= chi2) + 1) / (len(emp) + 1))}
-    msg = f"chi2={chi2:.1f} / {p} bins (cov randoms, N_rand={N}, h={h:.3f}) PTE={pte:.3f}"
-    if emp is not None:
-        msg += f" | PTE empírico={out['pte_emp']:.3f} ({len(emp)} randoms)"
-    out['msg'] = msg
-    return out
-
-
-def plot_chi2(ch, out_path, title):
-    from scipy.stats import chi2 as _chi2
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.6), gridspec_kw={'wspace': 0.28})
-    p = ch['p']
-    xmax = max(ch['chi2'] * 1.3, _chi2.ppf(0.999, p))
-    x = np.linspace(0, xmax, 400)
-    if ch['emp'] is not None:
-        a1.hist(ch['emp'], bins=30, range=(0, xmax), density=True, histtype='step',
-                color='xkcd:grey', lw=1.6, label=f"randoms ({len(ch['emp'])})")
-    a1.plot(x, _chi2.pdf(x, p), color='xkcd:steel blue', lw=1.8, label=rf"$\chi^2_{{{p}}}$")
-    xs = x[x >= ch['chi2']]
-    a1.fill_between(xs, _chi2.pdf(xs, p), color='xkcd:steel blue', alpha=0.25)
-    a1.axvline(ch['chi2'], color='xkcd:crimson', lw=2, label=rf"observado = {ch['chi2']:.1f}")
-    ttl = f"PTE = {ch['pte']:.3f}" + (f"   (empírico {ch['pte_emp']:.3f})" if ch['pte_emp'] is not None else "")
-    a1.set_title(ttl, fontsize=11)
-    a1.set_xlabel(r'$\chi^2$'); a1.set_ylabel('densidad'); a1.legend(fontsize=9); a1.grid(alpha=0.25)
-    k = np.arange(1, len(ch['contrib']) + 1)
-    a2.bar(k, ch['contrib'], color='xkcd:crimson', alpha=0.75)
-    a2.axhline(1, color='k', ls='--', lw=1, alpha=0.7)
-    a2.set_xlabel('autovector de C (autovalor decreciente)')
-    a2.set_ylabel(r'$h\,(v_i\cdot\Delta)^2/\lambda_i$')
-    a2b = a2.twinx()
-    a2b.semilogy(k, ch['eig'] / ch['eig'][0], 'o-', color='xkcd:steel blue', ms=3, lw=1)
-    a2b.set_ylabel(r'$\lambda_i/\lambda_1$', color='xkcd:steel blue')
-    a2.set_title(f"h = {ch['h']:.3f} (N_rand={ch['N_rand']}, p={p})", fontsize=11)
-    a2.grid(alpha=0.25)
-    fig.suptitle(title, fontsize=11)
-    fig.savefig(out_path, dpi=200, bbox_inches='tight'); plt.close(fig)
-    print(f"[chi2] figura: {out_path}")
+    D = _load_data(path)
+    print(f"[compare] {cat}/{survey}: datos <- {os.path.basename(os.path.dirname(D['pkl']))}")
+    return D
 
 
 #%% Figuras
 def _band(ax, res, color, label, scale=1e3, ls='-'):
     r = np.asarray(res['r_frac'])
-    net, sig = _net(res)
-    ax.fill_between(r, (net - sig) * scale, (net + sig) * scale, color=color, alpha=0.22)
-    ax.plot(r, net * scale, ls, color=color, lw=1.8, label=f"{label} (N={res.get('n_voids', '?')})")
+    ns = fm.net_signal(res)
+    sig = ns['band'] if ns['band'] is not None else np.zeros_like(ns['net'])
+    ax.fill_between(r, (ns['net'] - sig) * scale, (ns['net'] + sig) * scale, color=color, alpha=0.22)
+    ax.plot(r, ns['net'] * scale, ls, color=color, lw=1.8, label=f"{label} (N={res.get('n_voids', '?')})")
 
 
 def _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$'):
@@ -808,53 +718,36 @@ def _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$'):
 
 
 def _sel_tag(cfg):
-    return f"{cfg['zmin']}_{cfg['zmax']}_{cfg['rmin']}_{cfg['rmax']}"
+    return (f"{s1._seed_tag(cfg)}_z{cfg['zmin']:g}-{cfg['zmax']:g}_r{cfg['rmin']:g}-{cfg['rmax']:g}_"
+            f"{s1._delta_label(cfg.get('delta_value'))}_bkg{cfg.get('bkg_mode', 'randoms').replace('+', '')}")
 
 
-def plot_overview(ws, cfg, cat, out_dir):
-    """Todas las corridas de Websky de un catálogo: arriba kappa puro (geometría), abajo observados."""
-    top = [k for k in ('raw_FULL', 'raw_PR4', 'raw_ACT') if (cat if k != 'raw_FULL' else 'ALL', k) in ws]
-    bot = [k for k in ('obsPR4_PR4', 'obsPR4_ACTPR4', 'noiseACT_ACT') if (cat, k) in ws]
-    if not top and not bot:
+def plot_overview(ws, cfg, cats, out_dir):
+    """Corridas de Websky: arriba kappa puro (geometría), abajo observados. Una columna por catálogo."""
+    cols = []
+    for cat in cats:
+        top = [k for k in ('raw_FULL', 'raw_PR4', 'raw_ACT') if (cat if k != 'raw_FULL' else 'ALL', k) in ws]
+        bot = [k for k in ('obsPR4_PR4', 'obsPR4_ACTPR4', 'noiseACT_ACT') if (cat, k) in ws]
+        if top or bot:
+            cols.append((cat, top, bot))
+    if not cols:
         return
-    fig, axes = plt.subplots(2, 1, figsize=(7.5, 8), sharex=True, gridspec_kw={'hspace': 0.08})
-    for k in top:
-        _band(axes[0], ws[(cat if k != 'raw_FULL' else 'ALL', k)]['res'], RUN_COLORS[k], RUN_NAMES[k])
-    for k in bot:
-        _band(axes[1], ws[(cat, k)]['res'], RUN_COLORS[k], RUN_NAMES[k])
-    for ax, t in zip(axes, ('κ puro (sin ruido ni filtro)', 'como se observaría')):
-        _frame_axes(ax, cfg); ax.legend(fontsize=8, loc='lower right'); ax.set_title(t, fontsize=10)
-    axes[1].set_xlabel(r'$r/R_v$')
-    fig.suptitle(f"Websky | voids en footprint {cat} | bandas: σ de randoms", fontsize=11)
-    out = os.path.join(out_dir, f"Websky_overview_{cat}_{_sel_tag(cfg)}.pdf")
+    fig, axes = plt.subplots(2, len(cols), figsize=(7 * len(cols), 8), sharex=True, sharey='row',
+                             squeeze=False, gridspec_kw={'hspace': 0.08, 'wspace': 0.06})
+    for j, (cat, top, bot) in enumerate(cols):
+        for k in top:
+            _band(axes[0, j], ws[(cat if k != 'raw_FULL' else 'ALL', k)]['res'], RUN_COLORS[k], RUN_NAMES[k])
+        for k in bot:
+            _band(axes[1, j], ws[(cat, k)]['res'], RUN_COLORS[k], RUN_NAMES[k])
+        for i, t in enumerate(('κ puro (sin ruido ni filtro)', 'como se observaría')):
+            _frame_axes(axes[i, j], cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$' if j == 0 else '')
+            axes[i, j].legend(fontsize=8, loc='lower right')
+            axes[i, j].set_title(f"footprint {cat} | {t}" if i == 0 else t, fontsize=10)
+        axes[1, j].set_xlabel(r'$r/R_v$')
+    fig.suptitle(f"Websky | bandas: σ de randoms | {fm.bkg_text(ws[next(iter(ws))]['res'])}", fontsize=11)
+    out = os.path.join(out_dir, f"Websky_overview_{'-'.join(c[0] for c in cols)}_{_sel_tag(cfg)}.pdf")
     fig.savefig(out, dpi=200, bbox_inches='tight'); plt.close(fig)
     print(f"[plot] {out}")
-
-
-def plot_cats(ws, cfg, cats, out_dir):
-    """WH vs BOSS para cada corrida con footprint."""
-    keys = [k for k in RUN_NAMES if k != 'raw_FULL' and all((c, k) in ws for c in cats)]
-    if len(cats) < 2 or not keys:
-        return
-    n = len(keys)
-    fig, axes = plt.subplots(n, 1, figsize=(7.5, 3.2 * n), sharex=True, squeeze=False,
-                             gridspec_kw={'hspace': 0.1})
-    for ax, k in zip(axes[:, 0], keys):
-        for c in cats:
-            _band(ax, ws[(c, k)]['res'], CAT_COLORS[c], f"{c}")
-        _frame_axes(ax, cfg); ax.legend(fontsize=8, loc='lower right', title=RUN_NAMES[k], title_fontsize=8)
-    axes[-1, 0].set_xlabel(r'$r/R_v$')
-    out = os.path.join(out_dir, f"Websky_WHvsBOSS_{_sel_tag(cfg)}.pdf")
-    fig.savefig(out, dpi=200, bbox_inches='tight'); plt.close(fig)
-    print(f"[plot] {out}")
-
-
-def _load_data(path):
-    pkl = _resolve_pkl(path)
-    with open(pkl, 'rb') as f:
-        dd = pickle.load(f)
-    res, par = _pick(dd['results']), dd.get('parameters', {})
-    return {'res': res, 'pkl': pkl, 'release': '*', 'filter': _folder_filter(pkl), 'par': par}
 
 
 def _check_r(a, b, what):
@@ -864,84 +757,98 @@ def _check_r(a, b, what):
     return ok
 
 
-def compare_pr4_like(ws, cfg, cat, survey, data_path, out_dir):
-    """PR4 o ACT-PR4: datos vs Websky obsPR4 (+ kappa puro de referencia) y chi2."""
+def compare_pr4_like(ws, cfg, cats, survey, out_dir):
+    """PR4 o ACT-PR4: datos vs Websky obsPR4 (+ kappa puro de referencia) y chi2. Una columna por catálogo."""
     obs_key = 'obsPR4_PR4' if survey == 'PR4' else 'obsPR4_ACTPR4'
     ref_keys = ['raw_PR4', 'raw_FULL'] if survey == 'PR4' else ['raw_ACT']
-    if (cat, obs_key) not in ws:
-        print(f"[compare] (!) {cat}/{survey}: falta la corrida {obs_key}")
+    cols = []
+    for cat in cats:
+        if (cat, obs_key) not in ws:
+            print(f"[compare] (!) {cat}/{survey}: falta la corrida {obs_key}")
+            continue
+        D = _data_for(cfg, cat, survey)
+        if D is None or not _check_r(D['res'], ws[(cat, obs_key)]['res'], f"{cat}/{survey}"):
+            continue
+        cols.append((cat, D))
+    if not cols:
         return
-    D = _load_data(data_path)
-    print(f"[compare] {cat}/{survey}: datos <- {D['pkl']}")
-    W = ws[(cat, obs_key)]
-    if not _check_r(D['res'], W['res'], f"{cat}/{survey}"):
-        return
-    fig, (ax, axr) = plt.subplots(2, 1, figsize=(7.5, 7), sharex=True,
-                                  gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05})
-    r = np.asarray(D['res']['r_frac'])
-    nd, sd = _net(D['res'])
-    ax.errorbar(r, nd * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
-                label=f"Datos {cat} x {D['par'].get('cmb_map', survey)} (N={D['res'].get('n_voids', '?')})")
-    for k in ref_keys:
-        kk = ('ALL' if k == 'raw_FULL' else cat, k)
-        if kk in ws:
-            _band(ax, ws[kk]['res'], RUN_COLORS[k], RUN_NAMES[k], ls='--')
-    _band(ax, W['res'], RUN_COLORS[obs_key], RUN_NAMES[obs_key])
-    _frame_axes(ax, cfg); ax.legend(fontsize=8, loc='lower right')
-
-    ch = chi2_test(D, {'res': W['res'], 'pkl': W['pkl'], 'release': W['label'], 'filter': W['filter']})
-    print(f"[chi2] {cat}/{survey} datos vs {RUN_NAMES[obs_key]}: {ch['msg']}")
-    nw, sw = _net(W['res'])
-    with np.errstate(divide='ignore', invalid='ignore'):
-        axr.plot(r, (nd - nw) / np.sqrt(sd ** 2 + sw ** 2), 'o-', color=RUN_COLORS[obs_key])
-    for y in (-2, 2):
-        axr.axhline(y, color='gray', ls='--', alpha=0.7)
-    axr.axhline(0, color='k', alpha=0.5); axr.set_ylim(-5, 5); axr.grid(alpha=0.25)
-    axr.set_xlabel(r'$r/R_v$'); axr.set_ylabel(r'$\Delta/\sigma_{\rm rand}$')
-    tag = f"{cat}_{survey.replace('-', '')}_{_sel_tag(cfg)}"
-    out = os.path.join(out_dir, f"WebskyVsData_{tag}.pdf")
+    fig, axes = plt.subplots(2, len(cols), figsize=(7.5 * len(cols), 7), sharex=True, squeeze=False,
+                             gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05, 'wspace': 0.12})
+    for j, (cat, D) in enumerate(cols):
+        ax, axr = axes[0, j], axes[1, j]
+        W = ws[(cat, obs_key)]
+        r = np.asarray(D['res']['r_frac'])
+        ND, NW = fm.net_signal(D['res']), fm.net_signal(W['res'])
+        sd = np.sqrt(np.diag(ND['cov_rand']))
+        sw = np.sqrt(np.diag(NW['cov_rand']))
+        ax.errorbar(r, ND['net'] * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
+                    label=f"Datos {cat} x {D['par'].get('map_label', survey)} (N={D['res'].get('n_voids', '?')})")
+        for k in ref_keys:
+            kk = ('ALL' if k == 'raw_FULL' else cat, k)
+            if kk in ws:
+                _band(ax, ws[kk]['res'], RUN_COLORS[k], RUN_NAMES[k], ls='--')
+        _band(ax, W['res'], RUN_COLORS[obs_key], RUN_NAMES[obs_key])
+        _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$' if j == 0 else '')
+        ax.legend(fontsize=8, loc='lower right'); ax.set_title(f"{cat} | {survey}", fontsize=11)
+        ch = fm.chi2_profile(D['res'], W['res'])
+        print(f"[chi2] {cat}/{survey} datos vs {RUN_NAMES[obs_key]}: {ch['msg']}")
+        with np.errstate(divide='ignore', invalid='ignore'):
+            axr.plot(r, (ND['net'] - NW['net']) / np.sqrt(sd ** 2 + sw ** 2), 'o-', color=RUN_COLORS[obs_key])
+        for y in (-2, 2):
+            axr.axhline(y, color='gray', ls='--', alpha=0.7)
+        axr.axhline(0, color='k', alpha=0.5); axr.set_ylim(-5, 5); axr.grid(alpha=0.25)
+        axr.set_xlabel(r'$r/R_v$')
+        if j == 0:
+            axr.set_ylabel(r'$\Delta/\sigma_{\rm rand}$')
+        tag = f"{cat}_{survey.replace('-', '')}_{_sel_tag(cfg)}"
+        fm.plot_chi2(ch, os.path.join(out_dir, f"Chi2_WebskyVsData_{tag}.pdf"),
+                     f"Datos {cat} x {survey} vs {RUN_NAMES[obs_key]}  |  cov de randoms")
+    out = os.path.join(out_dir, f"WebskyVsData_{'-'.join(c[0] for c in cols)}_{survey.replace('-', '')}_{_sel_tag(cfg)}.pdf")
     fig.savefig(out, dpi=200, bbox_inches='tight'); plt.close(fig)
     print(f"[compare] {out}")
-    plot_chi2(ch, os.path.join(out_dir, f"Chi2_WebskyVsData_{tag}.pdf"),
-              f"Datos {cat} x {survey} vs {RUN_NAMES[obs_key]}  |  cov de randoms")
 
 
-def compare_act(ws, cfg, cat, data_path, out_dir):
-    """ACT: datos vs Websky ACT sin lensing (fg + ruido) + kappa puro, cociente de ruidos y chi2 del fg vs 0."""
-    nk = (cat, 'noiseACT_ACT')
-    if nk not in ws:
+def compare_act(ws, cfg, cats, out_dir):
+    """ACT: datos vs fg ACT sin lensing (Niall) + kappa puro; cociente de sigma_rand; chi2 del fg vs 0."""
+    cols = [cat for cat in cats if (cat, 'noiseACT_ACT') in ws]
+    for cat in set(cats) - set(cols):
         print(f"[compare] (!) {cat}/ACT: falta la corrida noiseACT_ACT")
+    if not cols:
         return
-    Wn = ws[nk]
-    D = _load_data(data_path) if data_path else None
-    fig, (ax, axr) = plt.subplots(2, 1, figsize=(7.5, 7), sharex=True,
-                                  gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05})
-    r = np.asarray(Wn['res']['r_frac'])
-    if D is not None and _check_r(D['res'], Wn['res'], f"{cat}/ACT"):
-        print(f"[compare] {cat}/ACT: datos <- {D['pkl']}")
-        nd, sd = _net(D['res'])
-        ax.errorbar(r, nd * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
-                    label=f"Datos {cat} x ACT (N={D['res'].get('n_voids', '?')})")
-        _, sn = _net(Wn['res'])
-        axr.plot(r, sn / sd, 'o-', color=RUN_COLORS['noiseACT_ACT'])
-        axr.axhline(1, color='k', alpha=0.5)
-        print(f"[compare] {cat}/ACT: σ_rand(Websky sin lensing)/σ_rand(datos) por bin: "
-              f"min={np.nanmin(sn / sd):.2f} med={np.nanmedian(sn / sd):.2f} max={np.nanmax(sn / sd):.2f}")
-    if (cat, 'raw_ACT') in ws:
-        _band(ax, ws[(cat, 'raw_ACT')]['res'], RUN_COLORS['raw_ACT'],
-              RUN_NAMES['raw_ACT'] + ' [sin filtro ACT]', ls='--')
-    _band(ax, Wn['res'], RUN_COLORS['noiseACT_ACT'], RUN_NAMES['noiseACT_ACT'])
-    _frame_axes(ax, cfg); ax.legend(fontsize=8, loc='lower right')
-    axr.set_ylim(0, 2); axr.grid(alpha=0.25)
-    axr.set_xlabel(r'$r/R_v$'); axr.set_ylabel(r'$\sigma^{\rm WS}_{\rm rand}/\sigma^{\rm datos}_{\rm rand}$')
-    tag = f"{cat}_ACT_{_sel_tag(cfg)}"
-    out = os.path.join(out_dir, f"WebskyVsData_{tag}.pdf")
+    fig, axes = plt.subplots(2, len(cols), figsize=(7.5 * len(cols), 7), sharex=True, squeeze=False,
+                             gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.05, 'wspace': 0.12})
+    for j, cat in enumerate(cols):
+        ax, axr = axes[0, j], axes[1, j]
+        Wn = ws[(cat, 'noiseACT_ACT')]
+        r = np.asarray(Wn['res']['r_frac'])
+        NN = fm.net_signal(Wn['res'])
+        D = _data_for(cfg, cat, 'ACT')
+        if D is not None and _check_r(D['res'], Wn['res'], f"{cat}/ACT"):
+            ND = fm.net_signal(D['res'])
+            sd = np.sqrt(np.diag(ND['cov_rand']))
+            ax.errorbar(r, ND['net'] * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
+                        label=f"Datos {cat} x ACT (N={D['res'].get('n_voids', '?')})")
+            ratio = NN['band'] / ND['band']
+            axr.plot(r, ratio, 'o-', color=RUN_COLORS['noiseACT_ACT'])
+            print(f"[compare] {cat}/ACT: σ_rand(fg Websky)/σ_rand(datos ACT) por bin: "
+                  f"min={np.nanmin(ratio):.2f} med={np.nanmedian(ratio):.2f} max={np.nanmax(ratio):.2f}")
+        if (cat, 'raw_ACT') in ws:
+            _band(ax, ws[(cat, 'raw_ACT')]['res'], RUN_COLORS['raw_ACT'],
+                  RUN_NAMES['raw_ACT'] + ' [sin filtro ACT]', ls='--')
+        _band(ax, Wn['res'], RUN_COLORS['noiseACT_ACT'], RUN_NAMES['noiseACT_ACT'])
+        _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$' if j == 0 else '')
+        ax.legend(fontsize=8, loc='lower right'); ax.set_title(f"{cat} | ACT ({ACT_COV_TAG})", fontsize=11)
+        axr.set_ylim(0, max(1.2, axr.get_ylim()[1])); axr.grid(alpha=0.25); axr.set_xlabel(r'$r/R_v$')
+        if j == 0:
+            axr.set_ylabel(r'$\sigma^{\rm fg}_{\rm rand}/\sigma^{\rm datos}_{\rm rand}$')
+        tag = f"{cat}_ACT_{_sel_tag(cfg)}"
+        ch = fm.chi2_profile(Wn['res'])
+        print(f"[chi2] {cat}/ACT foregrounds contra 0: {ch['msg']}")
+        fm.plot_chi2(ch, os.path.join(out_dir, f"Chi2_ACTforegrounds_vs0_{tag}.pdf"),
+                     f"Websky: foregrounds ACT sin lensing contra 0 | voids {cat} | cov de randoms")
+    out = os.path.join(out_dir, f"WebskyVsData_{'-'.join(cols)}_ACT_{_sel_tag(cfg)}.pdf")
     fig.savefig(out, dpi=200, bbox_inches='tight'); plt.close(fig)
     print(f"[compare] {out}")
-    ch = chi2_test({'res': Wn['res'], 'pkl': Wn['pkl'], 'release': Wn['label'], 'filter': Wn['filter']})
-    print(f"[chi2] {cat}/ACT foregrounds+ruido contra 0: {ch['msg']}")
-    plot_chi2(ch, os.path.join(out_dir, f"Chi2_ACTforegrounds_vs0_{tag}.pdf"),
-              f"Websky ACT sin lensing (fg + ruido) contra 0 | voids {cat} | cov de randoms")
 
 
 #%% Main
@@ -949,30 +856,39 @@ def run_one(cfg, run, cat, cat_spec, maps):
     lab = map_label(cfg, run)
     fr = run['frame']
     if run['field'] == 'raw':
-        kind, path, nside, filt, nlkk = 'alm', maps[('raw', fr)], cfg['nside'], 'none', None
+        spec = {'kind': 'alm', 'klm': maps[('raw', fr)], 'nside': cfg['nside'], 'prefiltered': False, 'nlkk': None}
+        filt = 'none'
     elif run['field'] == 'obsPR4':
-        kind, path, nside, filt, nlkk = 'alm', maps[('obsPR4', fr)], cfg['nside'], 'wiener', maps['pr4_nlkk']
-    else:   # noiseACT
-        kind, path, nside, filt, nlkk = 'map', maps['noiseACT'], maps['noiseACT_nside'], 'none', None
-    cov_spec = None
-    if run['cov'] == 'ACT':
-        cov_spec = {'label': 'ACTmask', 'kind': 'map', 'frame': 'galactic', 'nside': 512,
-                    'full_sky': False, 'apply_wiener': False, 'klm': None,
-                    'mask': maps[('mask', 'ACT', fr)], 'nlkk': None}
+        spec = {'kind': 'alm', 'klm': maps[('obsPR4', fr)], 'nside': cfg['nside'], 'prefiltered': False,
+                'nlkk': maps['pr4_nlkk']}
+        filt = 'wiener'
+    else:   # noiseACT: mapa de Niall, ya filtrado con el WF de ACT
+        spec = {'kind': 'map', 'klm': maps['noiseACT'], 'nside': maps['noiseACT_nside'], 'prefiltered': True,
+                'nlkk': None}
+        filt = 'none'
+    spec.update(label=lab, frame='galactic', full_sky=run['full_sky'], mask=maps[('mask', run['mask'], fr)])
+    cov_specs, cov_list = {}, None
+    if run['act_cov']:
+        for m in ('ACT', 'PR4'):
+            cov_specs[COV_KEYS[m]] = {'label': f'WS{m}mask', 'kind': 'map', 'frame': 'galactic',
+                                      'nside': hp.get_nside(hp.read_map(maps[('mask', m, fr)], dtype=np.float32)),
+                                      'full_sky': False, 'prefiltered': True, 'klm': None,
+                                      'mask': maps[('mask', m, fr)], 'nlkk': None}
+        cov_list = [COV_KEYS['ACT'], COV_KEYS['PR4']]
     print(f"\n================= WEBSKY | {cat_label(cat)} | {run['key']} -> {lab} "
-          f"[{filt}{', cobertura ACT' if cov_spec else ''}, frame {fr}] =================")
-    install_websky(cat_spec, {'label': lab, 'kind': kind, 'frame': 'galactic', 'nside': nside,
-                              'full_sky': run['full_sky'], 'apply_wiener': filt == 'wiener',
-                              'klm': path, 'mask': maps[('mask', run['mask'], fr)], 'nlkk': nlkk},
-                   cov_spec)
+          f"[{filt}{', cobertura ' + ACT_COV_TAG if cov_list else ''}, frame {fr}] =================")
+    install_websky(cat_spec, spec, cov_specs)
     c = dict(cfg)
-    c.update(filter_mode=filt, coverage_map=COV_KEY if cov_spec else None)
-    s1._run_single_map(c)
+    c.update(void_catalog='WEBSKY', cmb_map='WEBSKY', filter_mode=filt, coverage_map=cov_list,
+             coverage_tag=ACT_COV_TAG if cov_list else None)
+    try:
+        return s1._run_single_map(c)
+    finally:
+        uninstall_websky()
 
 
 def main(cfg=config):
     cfg = dict(cfg)
-    cfg.update(void_catalog='WEBSKY', cmb_map='WEBSKY', coverage_map=None)
     cats, runs = catalogs_of(cfg), build_runs(cfg)
 
     lens_out = os.path.join(cfg['output_folder'], 'lensing')
@@ -995,7 +911,7 @@ def main(cfg=config):
         if any(r['field'] == 'obsPR4' for r in runs):
             obs_G, maps['pr4_nlkk'] = kappa_obsPR4_alm(cfg, raw_G, maps_dir)
         for r in runs:
-            for m in {r['mask']} | ({'ACT'} if r['cov'] else set()):
+            for m in {r['mask']} | ({'ACT', 'PR4'} if r['act_cov'] else set()):
                 if ('mask', m, r['frame']) not in maps:
                     maps[('mask', m, r['frame'])] = mask_path(cfg, m, r['frame'], maps_dir)
 
@@ -1022,15 +938,17 @@ def main(cfg=config):
 
         print("\n>>> Catálogos")
         cat_specs = {}
-        def _spec(single, tpl, cat):
+
+        def _spec(single, tpl, cat, fp_path):
             return {'label': cat_label(cat), 'seed_template': tpl, 'single_file': single,
-                    'lon_col': 'l', 'lat_col': 'b', 'frame': 'galactic'}   # 'galactic' == identidad en S1
+                    'lon_col': 'l', 'lat_col': 'b', 'frame': 'galactic',      # 'galactic' == identidad en S1
+                    'footprint': ({'kind': 'healpix', 'path': fp_path, 'coord': 'G'} if fp_path else None)}
         if any(not r['footprint'] for r in runs):
             single, tpl = prepare_catalogs(cfg, cosmo, os.path.join(cfg['output_folder'], 'catalogs', 'fullsky_G'))
-            cat_specs[(None, 'G')] = _spec(single, tpl, None)
+            cat_specs[(None, 'G')] = _spec(single, tpl, None, None)
         for fr in sorted({r['frame'] for r in runs if r['footprint']}):
             for cat in cats:
-                F = build_footprint(cfg, cat, fr, maps_dir)
+                F, fp_path = build_footprint(cfg, cat, fr, maps_dir)
                 plot_geometry(F, [maps[('mask', m, fr)] for m in ('PR4', 'ACT') if ('mask', m, fr) in maps],
                               os.path.join(maps_dir, f"geometry_{cat}_in{fr}.png"),
                               f"Websky en {fr}: footprint {cat} + máscaras")
@@ -1039,27 +957,32 @@ def main(cfg=config):
                                                os.path.join(cfg['output_folder'], 'catalogs',
                                                             f"{cat}_{fr}{'rot' if rot_to else ''}"),
                                                F, cat, rot_to=rot_to)
-                cat_specs[(cat, fr)] = _spec(single, tpl, cat)
+                cat_specs[(cat, fr)] = _spec(single, tpl, cat, fp_path)
 
+        index = {}
+        if os.path.exists(_index_path(cfg)):
+            with open(_index_path(cfg)) as f:
+                index = json.load(f)
         for run in runs:
             for cat in (cats if run['footprint'] else [None]):
-                run_one(cfg, run, cat, cat_specs[(cat, run['frame'])], maps)
+                res = run_one(cfg, run, cat, cat_specs[(cat, run['frame'])], maps)
+                if res is not None:
+                    index['|'.join((cat or 'ALL', run['key']))] = res['pkl_path']
+                    with open(_index_path(cfg), 'w') as f:
+                        json.dump(index, f, indent=2)
 
     print("\n>>> Resultados guardados")
     ws = load_saved_websky(cfg, runs, cats)
-    for cat in cats:
-        plot_overview(ws, cfg, cat, lens_out)
-    plot_cats(ws, cfg, cats, lens_out)
+    if ws:
+        plot_overview(ws, cfg, cats, lens_out)
 
     print("\n>>> Comparación con datos")
-    for cat in cats:
-        cd = (cfg.get('compare_data') or {}).get(cat, {}) or {}
-        surveys = [s.upper() for s in cfg['surveys']]
-        for sv in ('PR4', 'ACT-PR4'):
-            if sv in surveys and cd.get(sv):
-                compare_pr4_like(ws, cfg, cat, sv, cd[sv], lens_out)
-        if 'ACT' in surveys:
-            compare_act(ws, cfg, cat, cd.get('ACT'), lens_out)
+    surveys = [s.upper() for s in cfg['surveys']]
+    for sv in ('PR4', 'ACT-PR4'):
+        if sv in surveys:
+            compare_pr4_like(ws, cfg, cats, sv, lens_out)
+    if 'ACT' in surveys:
+        compare_act(ws, cfg, cats, lens_out)
 
     if not cfg.get('compare_only'):
         with open(os.path.join(lens_out, 'SUCCESS_websky'), 'w') as f:

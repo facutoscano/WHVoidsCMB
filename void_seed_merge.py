@@ -85,6 +85,9 @@ def merge_seeds(df, eps_mpch=8.0, min_frac=0.2, n_seeds=None,
                       np.mean(np.cos(lat) * np.sin(lon)),
                       np.mean(np.sin(lat)))
         norm = np.sqrt(ux * ux + uy * uy + uz * uz)
+        # angular scatter of the members around the mean direction (no wrap at l=0)
+        cosd = (np.cos(lat) * np.cos(lon) * ux + np.cos(lat) * np.sin(lon) * uy
+                + np.sin(lat) * uz) / norm
         row = {
             'void_id': g,
             'l': np.degrees(np.arctan2(uy, ux)) % 360.0,
@@ -94,7 +97,7 @@ def merge_seeds(df, eps_mpch=8.0, min_frac=0.2, n_seeds=None,
             'R_void_std': sub['R_void'].std(),
             'n_seed_members': int(sub['seed'].nunique()),
             'n_points': int(m.sum()),
-            'sep_scatter_deg': np.degrees(np.std(np.column_stack([lon, lat]), axis=0).mean()),
+            'sep_scatter_deg': float(np.degrees(np.sqrt(np.mean(np.arccos(np.clip(cosd, -1, 1)) ** 2)))),
         }
         for extra in ('delta_23', 'completeness', 'delta_LOS'):
             if extra in sub.columns:
