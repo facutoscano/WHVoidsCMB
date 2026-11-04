@@ -41,7 +41,7 @@ config = {
 
     'delta_value': None,                # None: no cut | v>=0: delta_23 > v | v<0: delta_23 < v
     'zmin': 0.1, 'zmax': 0.5,
-    'rmin': 25.0, 'rmax': 70.0,         # Mpc/h
+    'rmin': 35.0, 'rmax': 70.0,         # Mpc/h
 
     'min_footprint_coverage': 0.9,      # a void (and a random) is kept if >= 90% of its
                                         # max_Rvoid*Rv disc lies inside the coverage region
