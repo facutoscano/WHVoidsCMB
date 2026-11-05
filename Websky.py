@@ -135,7 +135,7 @@ config.update({
         'WH':   {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
         'BOSS': {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
     },
-    'compare_only': False,                     # True: no corre nada, lee lo guardado y compara
+    'compare_only': True,                     # True: no corre nada, lee lo guardado y compara
 })
 
 NATIVE_FRAME = 'G'                             # Websky: cielo completo en galácticas
