@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'ACT-PR4',            # one map:
+    'cmb_map': 'ACT',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
@@ -50,7 +50,7 @@ config = {
     # ---------------- Geometry and filtering ----------------
     'max_Rvoid': 2.5,                   # stamp half-size in units of R_v
     'Rvoid_bin': 0.14,                  # radial bin width in units of R_v
-    'profile_method': 'healpix',        # 'healpix': profile from the map pixels at their exact
+    'profile_method': 'stamp',        # 'healpix': profile from the map pixels at their exact
                                         #            angular distance (independent of npix_stamp/rmin)
                                         # 'stamp'  : profile from the stacked gnomonic stamps
                                         #            (previous method; same folders/caches as before)
