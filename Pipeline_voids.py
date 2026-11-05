@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'ACT-PR4',            # one map:
+    'cmb_map': 'PLANCK_PR4',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
@@ -76,10 +76,10 @@ config = {
     'bkg_mode': 'randoms',              # 'randoms'       : net = P - <P_randoms>
                                         # 'outer'         : net = P - mean(P, r/Rv in bkg_outer)
                                         # 'randoms+outer' : both
-    'bkg_outer': (2.5, 3.0),            # r/R_v range used by 'outer'
+    'bkg_outer': (2.0, 2.5),            # r/R_v range used by 'outer'
 
     # ---------------- Cluster ----------------
-    'n_workers': 120,                   # worker processes (None = all cores)
+    'n_workers': 100,                   # worker processes (None = all cores)
 
     # ---------------- Step control ----------------
     'run_step_1': True,
