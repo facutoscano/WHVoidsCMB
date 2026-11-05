@@ -50,7 +50,7 @@ config = {
     # ---------------- Geometry and filtering ----------------
     'max_Rvoid': 2.5,                   # stamp half-size in units of R_v
     'Rvoid_bin': 0.14,                  # radial bin width in units of R_v
-    'profile_method': 'stamp',        # 'healpix': profile from the map pixels at their exact
+    'profile_method': 'healpix',        # 'healpix': profile from the map pixels at their exact
                                         #            angular distance (independent of npix_stamp/rmin)
                                         # 'stamp'  : profile from the stacked gnomonic stamps
                                         #            (previous method; same folders/caches as before)
