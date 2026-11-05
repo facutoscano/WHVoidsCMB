@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'PLANCK_PR4',            # one map:
+    'cmb_map': 'ACT-PR4',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
