@@ -299,6 +299,55 @@ def stacking_gnomonic(l, b, redshifts, r_voids, cmb_map, mask, max_Rvoid, npix_s
     return sum_map, count_map
 
 
+def radial_sums_healpix(lon, lat, redshifts, r_voids, cmb_map, mask, bins_frac):
+    """
+    Radial profile measured directly on the HEALPix pixels (no projection, no resampling).
+
+    For every object, all map pixels within bins_frac[-1]*R_v are taken and assigned to
+    rings of r/R_v by their exact angular distance to the centre, r = angle/theta(R_v).
+    Each object enters every ring with weight f_i = (unmasked pixels)/(all pixels) of its
+    ring, i.e. ring mean m_i weighted by f_i:
+        SUM_k   += s_ik / N_ik      (s = sum of unmasked values, N = all pixels in the ring)
+        COUNT_k += n_ik / N_ik      (n = unmasked pixels)
+    and the stacked profile is SUM/COUNT. This is the continuum limit of the stamp
+    estimator (equal weight per object in units of R_v, masked area down-weighted), but
+    uses every map pixel exactly once per ring: no aliasing of small-scale power through
+    the stamp grid and no gnomonic distortion for large angular sizes.
+    Returns SUM, COUNT (arrays of len(bins_frac)-1), additive over objects (jackknife).
+    """
+    nside = hp.get_nside(cmb_map)
+    edges = np.asarray(bins_frac, float)
+    nb = len(edges) - 1
+    S, C = np.zeros(nb), np.zeros(nb)
+    lon, lat = np.atleast_1d(lon), np.atleast_1d(lat)
+    theta_rv = np.radians(get_angularsize_comoving(np.atleast_1d(redshifts), np.atleast_1d(r_voids)))
+    vecs = np.atleast_2d(hp.ang2vec(lon, lat, lonlat=True))
+    for i in range(len(lon)):
+        pix = hp.query_disc(nside, vecs[i], edges[-1] * theta_rv[i])
+        if len(pix) == 0:
+            continue
+        pv = np.column_stack(hp.pix2vec(nside, pix))
+        x = np.arccos(np.clip(pv @ vecs[i], -1.0, 1.0)) / theta_rv[i]
+        k = np.searchsorted(edges, x, side='right') - 1
+        inb = (k >= 0) & (k < nb)
+        vals = cmb_map[pix]
+        good = inb & (mask[pix] > 0.9) & np.isfinite(vals) & (vals != hp.UNSEEN)
+        n_all = np.bincount(k[inb], minlength=nb)[:nb]
+        n_ok = np.bincount(k[good], minlength=nb)[:nb]
+        s_ok = np.bincount(k[good], weights=vals[good], minlength=nb)[:nb]
+        has = n_all > 0
+        S[has] += s_ok[has] / n_all[has]
+        C[has] += n_ok[has] / n_all[has]
+    return S, C
+
+
+def profile_from_sums(S, C):
+    S, C = np.asarray(S, float), np.asarray(C, float)
+    out = np.full(S.shape, np.nan)
+    np.divide(S, C, out=out, where=C > 0)
+    return out
+
+
 def stack_mean_map(sum_map, count_map):
     out = np.full_like(sum_map, np.nan)
     good = count_map > 0

@@ -70,10 +70,20 @@ works on the ACT footprint.
 
 ## The measurement
 
-For each void, a patch of the convergence map is projected on the tangent plane,
-centred on the void and scaled so that its side is $2\,\texttt{max\_Rvoid}\,R_v$ at the
-void redshift. Patches are co-added (masked pixels excluded) and the profile is
-measured in rings of $r/R_v$.
+The profile is measured in rings of $r/R_v$ out to `max_Rvoid`, with every void
+weighted equally (masked area down-weighted). Two estimators are available
+(`profile_method`):
+
+* `'healpix'` (default): the map pixels around each void are assigned to the rings by
+  their exact angular distance to the centre. Every map pixel is used, the result
+  does not depend on any resampling choice, and adding a void changes the profile only
+  by its own contribution.
+* `'stamp'`: a patch of the map is projected on the tangent plane, centred on the void
+  and scaled to $2\,\texttt{max\_Rvoid}\,R_v$; patches are co-added and the profile is
+  read from the stacked image. When the stamp pixel is coarser than the map pixel
+  (ACT), the profile picks up extra noise from the sampling of small-scale power.
+
+In both cases the stacked image shown in the figures comes from the stamps.
 
 **Background (randoms).** The profile of random positions is subtracted. The
 randoms reproduce the void sample as closely as possible:

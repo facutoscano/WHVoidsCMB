@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'PLANCK_PR4',            # one map:
+    'cmb_map': 'ACT-PR4',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
@@ -50,7 +50,12 @@ config = {
     # ---------------- Geometry and filtering ----------------
     'max_Rvoid': 2.5,                   # stamp half-size in units of R_v
     'Rvoid_bin': 0.14,                  # radial bin width in units of R_v
-    'npix_stamp': 400,                  # stamp side (capped so that the map is not oversampled)
+    'profile_method': 'healpix',        # 'healpix': profile from the map pixels at their exact
+                                        #            angular distance (independent of npix_stamp/rmin)
+                                        # 'stamp'  : profile from the stacked gnomonic stamps
+                                        #            (previous method; same folders/caches as before)
+    'npix_stamp': 400,                  # stamp side (capped so that the map is not oversampled);
+                                        # with 'healpix' it only sets the stacked image
     'filter_mode': 'wiener',            # 'none' | 'gaussian' | 'wiener' (not applied to pre-filtered maps)
     'smooth_value_arcmin': 0.0,         # FWHM, only for 'gaussian'
     'act_smooth_arcmin': 0.0,           # extra Gaussian FWHM on ACT (0 = none)
@@ -74,7 +79,7 @@ config = {
     'bkg_outer': (2.5, 3.0),            # r/R_v range used by 'outer'
 
     # ---------------- Cluster ----------------
-    'n_workers': 100,                   # worker processes (None = all cores)
+    'n_workers': 120,                   # worker processes (None = all cores)
 
     # ---------------- Step control ----------------
     'run_step_1': True,

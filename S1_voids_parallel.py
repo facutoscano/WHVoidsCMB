@@ -197,9 +197,13 @@ def _coverage_region(keys, data_folder, nside_cov, act_smooth=0.0):
     of `keys` (intersection). Voids AND randoms are selected on this region.
     """
     frac = np.ones(hp.nside2npix(nside_cov))
-    labels = []
+    labels, used = [], set()
     for k in keys:
         sp = _map_spec(k, data_folder, act_smooth)
+        mpath = os.path.abspath(str(sp['mask']))
+        if mpath in used:          # the same mask twice would square its boundary pixels
+            continue
+        used.add(mpath)
         frac *= fm.mask_fraction_map(sp['mask'], nside_cov, frame_in=fm.frame_code(sp['frame']),
                                      frame_out='G')
         labels.append(sp['label'])
@@ -229,6 +233,19 @@ def _sample_hash(df):
 
 
 #%% Selection helpers
+def profile_method_of(config):
+    """'stamp' (profile from stacked gnomonic stamps) | 'healpix' (from the map pixels)."""
+    m = str(config.get('profile_method', 'stamp')).lower()
+    if m not in ('stamp', 'healpix'):
+        raise ValueError(f"profile_method must be 'stamp' or 'healpix', not {m!r}")
+    return m
+
+
+def _method_tag(config):
+    """Folder/file tag: none for 'stamp' (names as before), '_hpx' for 'healpix'."""
+    return '_hpx' if profile_method_of(config) == 'healpix' else ''
+
+
 def _seed_tag(config):
     """single | concat{N} | merge{N}e{eps}f{min_frac} | both{N}e{eps}f{min_frac}"""
     n = config.get('N_seeds')
@@ -352,9 +369,23 @@ def _run_single_map(config):
               f'(pixel {pix_arcmin:.2f} arcmin @ nside={mspec["nside"]}; not oversampling)')
         npix_stamp = max(1, npix_cap)
     bins_frac = np.arange(0, max_Rvoid + Rvoid_bin, Rvoid_bin)
-    if 2 * max_Rvoid / npix_stamp > Rvoid_bin:
-        print(f'[npix] (!) {map_label}: stamp pixel = {2 * max_Rvoid / npix_stamp:.3f} Rv > Rvoid_bin = '
-              f'{Rvoid_bin} Rv for the smallest voids: the innermost bins can be empty (NaN)')
+    profile_method = profile_method_of(config)
+    if profile_method == 'stamp':
+        if 2 * max_Rvoid / npix_stamp > Rvoid_bin:
+            print(f'[npix] (!) {map_label}: stamp pixel = {2 * max_Rvoid / npix_stamp:.3f} Rv > Rvoid_bin = '
+                  f'{Rvoid_bin} Rv for the smallest voids: the innermost bins can be empty (NaN)')
+    else:
+        theta_in = np.radians(fm.get_angularsize_comoving(zmax, Rvoid_bin * rmin))     # innermost ring
+        n_in = np.pi * theta_in ** 2 / hp.nside2pixarea(mspec['nside'])
+        if n_in < 5:
+            print(f'[pix] (!) {map_label}: the innermost ring (r < {Rvoid_bin} Rv) of the smallest voids '
+                  f'(R={rmin:g} at z={zmax:g}) holds only ~{n_in:.1f} map pixels (nside={mspec["nside"]})')
+    if 'outer' in config.get('bkg_mode', 'randoms'):
+        o = tuple(config.get('bkg_outer', (2.0, 2.5)))
+        rc = 0.5 * (bins_frac[:-1] + bins_frac[1:])
+        if not np.any((rc >= o[0]) & (rc <= o[1])):
+            raise ValueError(f"bkg_outer={o} has no radial bin: profiles reach r/Rv={bins_frac[-1]:.2f} "
+                             f"(max_Rvoid={max_Rvoid}); increase max_Rvoid or change bkg_outer")
 
     binning_mode, n_bins_q = config['binning_mode'], config['n_bins']
     exec_mode, n_subsamples = config['exec_mode'], config['n_subsamples']
@@ -392,7 +423,8 @@ def _run_single_map(config):
     file_suffix = (f'{cat_label}_{map_label}_{binning_mode}{n_bins_q}bins_{exec_mode}_'
                    f'{seed_tag}_z{zmin:g}-{zmax:g}_r{rmin:g}-{rmax:g}_maxRv{max_Rvoid:g}_{delta_label}_'
                    f'{filter_label}_rand{random_pool}{excl_txt}'
-                   + (f'_cov{cov_tag}' if cov_tag else '') + f'_bkg{bkg_mode.replace("+", "")}')
+                   + (f'_cov{cov_tag}' if cov_tag else '') + f'_bkg{bkg_mode.replace("+", "")}'
+                   + _method_tag(config))
     run_folder = os.path.join(output_folder, file_suffix)
     os.makedirs(run_folder, exist_ok=True)
     stacks_cache_root = os.path.join(output_folder, 'Cache_Stacks', cat_label, map_label)
@@ -446,6 +478,8 @@ def _run_single_map(config):
         'footprint': cat.get('footprint') if random_pool == 'footprint' else None,
         'random_excl': random_excl, 'version': pm.CACHE_VERSION,
     }
+    if profile_method != 'stamp':          # stamp keys stay as before: existing caches are reused
+        base_params['profile'] = profile_method
 
     def _stack(df, kind):
         lon, lat = fm.to_map_frame(df['l'].values, df['b'].values, map_frame)
@@ -460,7 +494,8 @@ def _run_single_map(config):
             stamp_mask=stamp_mask, center_mask=center, cov_map=cov_frac, map_frame=map_frame,
             min_cov=min_cov, stacks_cache_folder=cache_dir, cache_key=key, n_random_factor=n_rand,
             n_rotations=n_rotations, n_subsamples=n_subsamples, force_rerun=force_rerun,
-            n_workers=n_workers, bkg_mode=bkg_mode, bkg_outer=bkg_outer)
+            n_workers=n_workers, bkg_mode=bkg_mode, bkg_outer=bkg_outer,
+            profile_method=profile_method)
         res['R_void_median'] = float(np.median(df['R_void'].values))
         return res
 
@@ -512,7 +547,7 @@ def _run_single_map(config):
     # SAVING
     rvoid_summary = fm.build_rvoid_summary(all_results)
     parameters = dict(config)
-    parameters.update({'map_label': map_label, 'catalog_label': cat_label, 'filter_label': filter_label,
+    parameters.update({'profile_method': profile_method, 'map_label': map_label, 'catalog_label': cat_label, 'filter_label': filter_label,
                        'coverage_keys': cov_labels, 'coverage_tag': cov_tag, 'npix_stamp_eff': npix_stamp,
                        'run_folder': run_folder, 'R_void_median_per_sample': rvoid_summary})
     print('[Results] Saving results...')
@@ -560,7 +595,7 @@ def _primary_result(all_results, map_label, sample_lb_gal=None):
 def _sel_tag(config):
     return (f"{config['binning_mode']}{config['n_bins']}bins_{_seed_tag(config)}_z{config['zmin']:g}-{config['zmax']:g}_"
             f"r{config['rmin']:g}-{config['rmax']:g}_{_delta_label(config.get('delta_value'))}_"
-            f"bkg{config.get('bkg_mode', 'randoms').replace('+', '')}")
+            f"bkg{config.get('bkg_mode', 'randoms').replace('+', '')}{_method_tag(config)}")
 
 
 def _run_group(config, keys, tag):

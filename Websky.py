@@ -50,6 +50,10 @@ COMPARACIÓN CON DATOS ('compare_data'[catálogo][survey] = 'auto' | pkl | carpe
       PR4     -> PLANCK_PR4, cobertura propia
       ACT-PR4 -> PLANCK_PR4, cobertura ACTxPR4 (modo 'ACT-PR4' de Pipeline_voids)
       ACT     -> ACT,        cobertura ACTxPR4 (modo 'ACT-PR4' de Pipeline_voids)
+    y con el mismo 'profile_method' (stamp | healpix) que Websky.
+    La corrida PR4 de datos tiene que ser cmb_map='PLANCK_PR4' sola: las de grupo ('All_Planck')
+    seleccionan los voids con la máscara común del grupo y no son comparables.
+    Las figuras PR4 y ACT-PR4 se hacen igual sin datos (sólo Websky).
     PR4, ACT-PR4: datos vs obsPR4 -> perfiles + figura aparte de chi2 (cov de randoms).
     ACT:          datos ACT vs noiseACT (+ raw_ACT de referencia), sigma_rand(Niall)/sigma_rand(datos)
                   y chi2 de noiseACT contra 0 (¿el sesgo de foregrounds es compatible con nulo?).
@@ -135,7 +139,7 @@ config.update({
         'WH':   {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
         'BOSS': {'PR4': 'auto', 'ACT': 'auto', 'ACT-PR4': 'auto'},
     },
-    'compare_only': True,                     # True: no corre nada, lee lo guardado y compara
+    'compare_only': False,                     # True: no corre nada, lee lo guardado y compara
 })
 
 NATIVE_FRAME = 'G'                             # Websky: cielo completo en galácticas
@@ -676,6 +680,8 @@ def find_data_run(cfg, cat, survey):
             continue
         if not all(_same(par.get(k), cfg.get(k)) for k in _SEL_KEYS):
             continue
+        if s1.profile_method_of(par) != s1.profile_method_of(cfg):      # older runs: 'stamp'
+            continue
         if best is None or os.path.getmtime(pkl) > os.path.getmtime(best):
             best = pkl
     if best is None:
@@ -719,7 +725,8 @@ def _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$'):
 
 def _sel_tag(cfg):
     return (f"{s1._seed_tag(cfg)}_z{cfg['zmin']:g}-{cfg['zmax']:g}_r{cfg['rmin']:g}-{cfg['rmax']:g}_"
-            f"{s1._delta_label(cfg.get('delta_value'))}_bkg{cfg.get('bkg_mode', 'randoms').replace('+', '')}")
+            f"{s1._delta_label(cfg.get('delta_value'))}_bkg{cfg.get('bkg_mode', 'randoms').replace('+', '')}"
+            f"{s1._method_tag(cfg)}")
 
 
 def plot_overview(ws, cfg, cats, out_dir):
@@ -758,17 +765,26 @@ def _check_r(a, b, what):
 
 
 def compare_pr4_like(ws, cfg, cats, survey, out_dir):
-    """PR4 o ACT-PR4: datos vs Websky obsPR4 (+ kappa puro de referencia) y chi2. Una columna por catálogo."""
+    """
+    PR4 o ACT-PR4: kappa puro y kappa como PR4 (ruido + Wiener) de Websky, más los datos si
+    hay una corrida con la misma selección (y entonces chi2 datos vs Websky). La figura se
+    hace siempre que existan las corridas de Websky; una columna por catálogo.
+      PR4     : datos = PLANCK_PR4 con su propia cobertura (cmb_map='PLANCK_PR4' en Pipeline_voids;
+                las corridas de grupo, p.ej. 'All_Planck', usan otra cobertura y no sirven)
+      ACT-PR4 : datos = PLANCK_PR4 con cobertura ACTxPR4 (cmb_map='ACT-PR4' en Pipeline_voids)
+    """
     obs_key = 'obsPR4_PR4' if survey == 'PR4' else 'obsPR4_ACTPR4'
     ref_keys = ['raw_PR4', 'raw_FULL'] if survey == 'PR4' else ['raw_ACT']
     cols = []
     for cat in cats:
         if (cat, obs_key) not in ws:
-            print(f"[compare] (!) {cat}/{survey}: falta la corrida {obs_key}")
+            print(f"[compare] (!) {cat}/{survey}: falta la corrida de Websky {obs_key}")
             continue
         D = _data_for(cfg, cat, survey)
-        if D is None or not _check_r(D['res'], ws[(cat, obs_key)]['res'], f"{cat}/{survey}"):
-            continue
+        if D is not None and not _check_r(D['res'], ws[(cat, obs_key)]['res'], f"{cat}/{survey}"):
+            D = None
+        if D is None:
+            print(f"[compare] {cat}/{survey}: figura sólo con Websky (sin datos comparables)")
         cols.append((cat, D))
     if not cols:
         return
@@ -777,32 +793,38 @@ def compare_pr4_like(ws, cfg, cats, survey, out_dir):
     for j, (cat, D) in enumerate(cols):
         ax, axr = axes[0, j], axes[1, j]
         W = ws[(cat, obs_key)]
-        r = np.asarray(D['res']['r_frac'])
-        ND, NW = fm.net_signal(D['res']), fm.net_signal(W['res'])
-        sd = np.sqrt(np.diag(ND['cov_rand']))
-        sw = np.sqrt(np.diag(NW['cov_rand']))
-        ax.errorbar(r, ND['net'] * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
-                    label=f"Datos {cat} x {D['par'].get('map_label', survey)} (N={D['res'].get('n_voids', '?')})")
+        r = np.asarray(W['res']['r_frac'])
+        NW = fm.net_signal(W['res'])
         for k in ref_keys:
             kk = ('ALL' if k == 'raw_FULL' else cat, k)
             if kk in ws:
                 _band(ax, ws[kk]['res'], RUN_COLORS[k], RUN_NAMES[k], ls='--')
         _band(ax, W['res'], RUN_COLORS[obs_key], RUN_NAMES[obs_key])
+        if D is not None:
+            ND = fm.net_signal(D['res'])
+            sd = np.sqrt(np.diag(ND['cov_rand']))
+            sw = np.sqrt(np.diag(NW['cov_rand']))
+            ax.errorbar(r, ND['net'] * 1e3, yerr=sd * 1e3, fmt='o-', color='k', capsize=3, zorder=5,
+                        label=f"Datos {cat} x {D['par'].get('map_label', survey)} (N={D['res'].get('n_voids', '?')})")
+            ch = fm.chi2_profile(D['res'], W['res'])
+            print(f"[chi2] {cat}/{survey} datos vs {RUN_NAMES[obs_key]}: {ch['msg']}")
+            with np.errstate(divide='ignore', invalid='ignore'):
+                axr.plot(r, (ND['net'] - NW['net']) / np.sqrt(sd ** 2 + sw ** 2), 'o-',
+                         color=RUN_COLORS[obs_key])
+            tag = f"{cat}_{survey.replace('-', '')}_{_sel_tag(cfg)}"
+            fm.plot_chi2(ch, os.path.join(out_dir, f"Chi2_WebskyVsData_{tag}.pdf"),
+                         f"Datos {cat} x {survey} vs {RUN_NAMES[obs_key]}  |  cov de randoms")
+        else:
+            axr.text(0.5, 0.5, 'sin corrida de datos con la misma selección', ha='center', va='center',
+                     transform=axr.transAxes, color='gray', fontsize=9)
         _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$' if j == 0 else '')
         ax.legend(fontsize=8, loc='lower right'); ax.set_title(f"{cat} | {survey}", fontsize=11)
-        ch = fm.chi2_profile(D['res'], W['res'])
-        print(f"[chi2] {cat}/{survey} datos vs {RUN_NAMES[obs_key]}: {ch['msg']}")
-        with np.errstate(divide='ignore', invalid='ignore'):
-            axr.plot(r, (ND['net'] - NW['net']) / np.sqrt(sd ** 2 + sw ** 2), 'o-', color=RUN_COLORS[obs_key])
         for y in (-2, 2):
             axr.axhline(y, color='gray', ls='--', alpha=0.7)
         axr.axhline(0, color='k', alpha=0.5); axr.set_ylim(-5, 5); axr.grid(alpha=0.25)
         axr.set_xlabel(r'$r/R_v$')
         if j == 0:
             axr.set_ylabel(r'$\Delta/\sigma_{\rm rand}$')
-        tag = f"{cat}_{survey.replace('-', '')}_{_sel_tag(cfg)}"
-        fm.plot_chi2(ch, os.path.join(out_dir, f"Chi2_WebskyVsData_{tag}.pdf"),
-                     f"Datos {cat} x {survey} vs {RUN_NAMES[obs_key]}  |  cov de randoms")
     out = os.path.join(out_dir, f"WebskyVsData_{'-'.join(c[0] for c in cols)}_{survey.replace('-', '')}_{_sel_tag(cfg)}.pdf")
     fig.savefig(out, dpi=200, bbox_inches='tight'); plt.close(fig)
     print(f"[compare] {out}")

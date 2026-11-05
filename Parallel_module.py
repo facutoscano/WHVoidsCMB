@@ -22,13 +22,20 @@ def _set_worker_globals(**kw):
     _W.update(kw)
 
 
+def _radial(lon, lat, z, rv, max_Rvoid, npix_stamp, bins_frac):
+    """Radial profile of a set of positions with the configured estimator."""
+    if _W.get('method', 'stamp') == 'healpix':
+        S, C = fm.radial_sums_healpix(lon, lat, z, rv, _W['cmb'], _W['stamp_mask'], bins_frac)
+        return fm.profile_from_sums(S, C)
+    s, c = fm.stacking_gnomonic(lon, lat, z, rv, _W['cmb'], _W['stamp_mask'],
+                                max_Rvoid, npix_stamp, range(len(lon)), silent=True)
+    return fm.radial_profile_weighted(s, c, max_Rvoid, bins_frac, silent=True)[0]
+
+
 def _profile_worker(task):
-    """Stack at the given positions (map frame) and return the radial profile."""
+    """Profile at the given positions (map frame)."""
     pos_l, pos_b, z, rv, max_Rvoid, npix_stamp, bins_frac = task
-    s, c = fm.stacking_gnomonic(pos_l, pos_b, z, rv, _W['cmb'], _W['stamp_mask'],
-                                max_Rvoid, npix_stamp, range(len(pos_l)), silent=True)
-    prof, _ = fm.radial_profile_weighted(s, c, max_Rvoid, bins_frac, silent=True)
-    return prof
+    return _radial(pos_l, pos_b, z, rv, max_Rvoid, npix_stamp, bins_frac)
 
 
 def _random_worker(task):
@@ -43,17 +50,20 @@ def _random_worker(task):
     l, b, zz, rr, n_swap = fm.matched_randoms(z[perm], rv[perm], _W['center'], _W['cov'],
                                               rad_frac, min_cov, rng)
     lon, lat = fm.to_map_frame(l, b, _W['frame'])
-    s, c = fm.stacking_gnomonic(lon, lat, zz, rr, _W['cmb'], _W['stamp_mask'],
-                                max_Rvoid, npix_stamp, range(len(lon)), silent=True)
-    prof, _ = fm.radial_profile_weighted(s, c, max_Rvoid, bins_frac, silent=True)
-    return prof, n_swap
+    return _radial(lon, lat, zz, rr, max_Rvoid, npix_stamp, bins_frac), n_swap
 
 
 def _region_worker(task):
-    """Stack a void subset and return its (sum_map, count_map) for JK/signal."""
+    """Stack a void subset and return its (sum_map, count_map) for JK/signal (stamp)."""
     l_sub, b_sub, z_sub, rv_sub, max_Rvoid, npix_stamp = task
     return fm.stacking_gnomonic(l_sub, b_sub, z_sub, rv_sub, _W['cmb'], _W['stamp_mask'],
                                 max_Rvoid, npix_stamp, range(len(l_sub)), silent=True)
+
+
+def _region_worker_hp(task):
+    """Radial (SUM, COUNT) of a void subset on the HEALPix pixels, additive for the JK."""
+    l_sub, b_sub, z_sub, rv_sub, bins_frac = task
+    return fm.radial_sums_healpix(l_sub, b_sub, z_sub, rv_sub, _W['cmb'], _W['stamp_mask'], bins_frac)
 
 
 #%% Null tests
@@ -107,15 +117,26 @@ def _signal_and_jk_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_
     out = list(executor.map(_region_worker, tasks))
     sums = np.array([s for s, _ in out])
     counts = np.array([c for _, c in out])
-
     SUM, COUNT = sums.sum(axis=0), counts.sum(axis=0)
-    signal_map = fm.stack_mean_map(SUM, COUNT)
-    prof_total, r_frac = fm.radial_profile_weighted(SUM, COUNT, max_Rvoid, bins_frac, silent=True)
+    signal_map = fm.stack_mean_map(SUM, COUNT)          # stacked image (both methods)
+
+    if _W.get('method', 'stamp') == 'healpix':
+        # profile and jackknife from the HEALPix pixels; the stamps above are only the image
+        out = list(executor.map(_region_worker_hp, [(l[idx], b[idx], redshifts[idx], r_voids[idx], bins_frac)
+                                                    for idx in regions]))
+        sums = np.array([s for s, _ in out])
+        counts = np.array([c for _, c in out])
+        SUM, COUNT = sums.sum(axis=0), counts.sum(axis=0)
+        prof_total = fm.profile_from_sums(SUM, COUNT)
+        r_frac = 0.5 * (np.asarray(bins_frac[:-1]) + np.asarray(bins_frac[1:]))
+        jk_of = lambda k: fm.profile_from_sums(SUM - sums[k], COUNT - counts[k])
+    else:
+        prof_total, r_frac = fm.radial_profile_weighted(SUM, COUNT, max_Rvoid, bins_frac, silent=True)
+        jk_of = lambda k: fm.radial_profile_weighted(SUM - sums[k], COUNT - counts[k],
+                                                     max_Rvoid, bins_frac, silent=True)[0]
 
     if mode == 'errors':
-        jk_profiles = np.array([fm.radial_profile_weighted(SUM - sums[k], COUNT - counts[k],
-                                                           max_Rvoid, bins_frac, silent=True)[0]
-                                for k in range(len(regions))])
+        jk_profiles = np.array([jk_of(k) for k in range(len(regions))])
         cov_matrix, err = fm.sample_covariance(jk_profiles, kind='jk')
     else:
         jk_profiles, cov_matrix = None, None
@@ -128,7 +149,7 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
                                   bins_frac, lensing_map, stamp_mask, center_mask, cov_map, map_frame,
                                   min_cov, stacks_cache_folder, cache_key, n_random_factor, n_rotations,
                                   n_subsamples=20, force_rerun=False, n_workers=None,
-                                  bkg_mode='randoms', bkg_outer=(2.0, 2.5)):
+                                  bkg_mode='randoms', bkg_outer=(2.0, 2.5), profile_method='stamp'):
     """
     Stack one void sample on one map, with jackknife errors and the two null tests.
 
@@ -138,6 +159,9 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
     center_mask     : galactic mask where random centres may fall (map mask x survey footprint).
     cov_map         : galactic coverage map used to select voids (and randoms).
     cache_key       : hash of everything that determines the result (sample + map + settings).
+    profile_method  : 'stamp'   -> profile from the stacked gnomonic stamps (npix_stamp)
+                      'healpix' -> profile from the map pixels at their exact angular distance;
+                                   the stamps are then only used for the stacked image.
     """
     z_mean, n_voids = data_sample_bin['z'].mean(), len(data_sample_bin)
     z_text = f"{data_sample_bin['z'].min():.2f}_{data_sample_bin['z'].max():.2f}"
@@ -173,8 +197,10 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
         existing_rot = list(dc['null_profiles_rot']) if 'null_profiles_rot' in dc else []
         existing_rand = list(dc['null_profiles_rand']) if 'null_profiles_rand' in dc else []
 
+    if profile_method not in ('stamp', 'healpix'):
+        raise ValueError(f"profile_method must be 'stamp' or 'healpix', not {profile_method!r}")
     _set_worker_globals(cmb=lensing_map, stamp_mask=stamp_mask, center=center_mask,
-                        cov=cov_map, frame=map_frame)
+                        cov=cov_map, frame=map_frame, method=profile_method)
     ctx = mp.get_context('fork')
     n_swap = 0
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
@@ -219,6 +245,7 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
             'z_mean': z_mean, 'map': signal_map, 'r_frac': r_frac, 'profile': prof_total,
             'error': prof_err, 'jk_profiles': jk_profiles, 'cov_jk': cov_jk,
             'n_voids': n_voids, 'key': z_text, 'cache_key': cache_key, 'npix_stamp': npix_stamp,
+            'profile_method': profile_method,
             **nulls,
         }
     final_result.update(bkg_mode=bkg_mode, bkg_outer=tuple(bkg_outer))
