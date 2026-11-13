@@ -23,7 +23,7 @@ config = {
     'output_folder': '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/',
 
     # ---------------- Data selection ----------------
-    'cmb_map': 'ACT',            # one map:
+    'cmb_map': 'PLANCK_PR4',            # one map:
                                         #   'PLANCK_PR4' | 'PLANCK_PR3' | 'PLANCK_CIBcomb' (lensing+CIB tracer) |
                                         #   'PLANCK_SZ' | 'PLANCK_SZ_deproj' | 'PLANCK_inhom' | 'ACT'
                                         # groups (same voids for every map: common coverage):
@@ -32,7 +32,7 @@ config = {
                                         #   'ACT-PR4'    (PR4 vs ACT on the ACT x PR4 footprint)
     'common_coverage': True,            # groups: select voids on the intersection of all the masks
 
-    'void_catalog': 'BOTH',               # 'WH' (Wen & Han) | 'BOSS' | 'BOTH' (both + comparison in columns)
+    'void_catalog': 'WH',               # 'WH' (Wen & Han) | 'BOSS' | 'BOTH' (both + comparison in columns)
     'N_seeds': 100,                     # number of Sparkling seed catalogues (None = single catalogue)
     'seed_mode': 'merge',               # 'concat' | 'merge' (DBSCAN single catalogue) | 'both'
     'merge_eps_mpch': 8.0,              # DBSCAN linking length [Mpc/h]

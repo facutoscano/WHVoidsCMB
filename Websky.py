@@ -82,6 +82,7 @@ from astropy import units as u
 import Functions_module as fm
 import void_seed_merge as vsm
 import S1_voids_parallel as s1
+from match_sample import match_distribution
 from Pipeline_voids import config as PIPELINE_CONFIG
 
 
@@ -93,8 +94,8 @@ config.update({
     'data_results':  '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/',   # para 'auto'
 
     # ---------------- Qué correr ----------------
-    'void_catalogs': 'BOTH',                     # 'WH' | 'BOSS' | 'BOTH'
-    'surveys': ['FULL', 'PR4', 'ACT', 'ACT-PR4'],
+    'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'BOTH'
+    'surveys': ['FULL', 'PR4'],
 
     # ---------------- Websky: catálogo ----------------
     'cosmology':   'websky',                   # 'websky' (h=0.68, Om=0.31) | 'planck18' (test)
@@ -141,6 +142,23 @@ config.update({
     },
     'compare_only': False,                     # True: no corre nada, lee lo guardado y compara
 })
+
+
+#%% Submuestreo de Websky igualado a los datos (fuera de config; config['match_to_data'] lo pisa)
+# Después del merge y del corte de cobertura (la misma muestra que entra al stacking) se sortean
+# voids de Websky para reproducir la distribución de la muestra de datos del mismo catálogo y
+# cobertura (WH x PR4, WH x ACTxPR4, ...). Sólo corridas con footprint (PR4, ACT, ACT-PR4); FULL
+# no tiene contraparte en datos y no se toca. Las corridas con igual cobertura (raw_PR4 y
+# obsPR4_PR4; las tres de ACT) usan los MISMOS voids. Carpetas, índice y figuras llevan el
+# sufijo _match... (no pisan las corridas sin igualar).
+MATCH_TO_DATA = {
+    'enable':    True,
+    'cols':      ('R_void',),              # ('R_void',) | ('R_void', 'z') | (..., 'delta_23')
+    'n_bins':    {'R_void': 10, 'z': 6, 'delta_23': 5},   # cuantiles de los DATOS por columna
+    'n_target':  'data',                   # 'data' (mismo N) | 'max' (máx. N con la misma forma) | int
+    'draw_seed': 0,                        # una corrida por semilla de sorteo
+    'on_short':  'shrink',                 # 'shrink' | 'replace' | 'error'  (ver match_sample.py)
+}
 
 NATIVE_FRAME = 'G'                             # Websky: cielo completo en galácticas
 SURVEY_FRAME = {'FULL': 'G', 'PR4': 'G', 'ACT': 'C', 'ACT-PR4': 'C'}
@@ -723,10 +741,118 @@ def _frame_axes(ax, cfg, ylabel=r'$\kappa_{\rm net}\;[10^{-3}]$'):
     ax.set_ylabel(ylabel); ax.grid(alpha=0.25); ax.set_xlim(-0.1, cfg['max_Rvoid'] + 0.1)
 
 
-def _sel_tag(cfg):
+def _sel_tag(cfg, with_match=True):
     return (f"{s1._seed_tag(cfg)}_z{cfg['zmin']:g}-{cfg['zmax']:g}_r{cfg['rmin']:g}-{cfg['rmax']:g}_"
             f"{s1._delta_label(cfg.get('delta_value'))}_bkg{cfg.get('bkg_mode', 'randoms').replace('+', '')}"
-            f"{s1._method_tag(cfg)}")
+            f"{s1._method_tag(cfg)}" + (match_tag(cfg) if with_match else ''))
+
+
+#%% Submuestreo de Websky igualado a los datos
+_DATA_COV_KEYS = {'PR4': ['PLANCK_PR4'], 'ACT-PR4': ['PLANCK_PR4', 'ACT'], 'ACT': ['PLANCK_PR4', 'ACT']}
+_MATCH_SHORT = {'R_void': 'R', 'z': 'z', 'delta_23': 'd23', 'delta_int': 'dint'}
+_REF_CACHE, _MATCH_PLOTTED = {}, set()
+
+
+def _match_cfg(cfg):
+    m = cfg.get('match_to_data', MATCH_TO_DATA) or {}
+    return m if m.get('enable') else None
+
+
+def match_tag(cfg):
+    m = _match_cfg(cfg)
+    if m is None:
+        return ''
+    cols = ''.join(_MATCH_SHORT.get(c, c) for c in m['cols'])
+    nt = m.get('n_target', 'data')
+    return f"_match{cols}-N{nt}-d{m.get('draw_seed', 0)}"
+
+
+def match_applies(cfg, run):
+    return _match_cfg(cfg) is not None and run['footprint'] and run['survey'] in _DATA_COV_KEYS
+
+
+def data_reference(cfg, cat, survey):
+    """
+    Muestra de DATOS (cat x survey) con la misma selección y cobertura que la corrida de datos
+    con la que se compara Websky: mismo load_void_samples de S1, con la cosmología Planck18 de los
+    datos (Websky.py la reemplaza por la de Websky para sus propios catálogos).
+    """
+    key = (cat, survey)
+    if key in _REF_CACHE:
+        return _REF_CACHE[key]
+    keys = _DATA_COV_KEYS[survey]
+    prev = (fm.Planck18, vsm.Planck18, s1._catalog_spec, s1._map_spec)
+    fm.Planck18 = vsm.Planck18 = Planck18
+    s1._catalog_spec, s1._map_spec = _ORIG_SPECS
+    try:
+        cov_frac, labels = s1._coverage_region(keys, cfg['data_folder'], cfg.get('coverage_nside', 256),
+                                               cfg.get('act_smooth_arcmin', 0.0))
+        smp = s1.load_void_samples(cfg, s1._catalog_spec(cat, cfg['data_folder']), cov_frac)
+    finally:
+        fm.Planck18, vsm.Planck18, s1._catalog_spec, s1._map_spec = prev
+    ref = smp['merged'] if smp['merged'] is not None else smp['single']
+    if ref is None:
+        raise ValueError("match_to_data necesita seed_mode='merge' o el catálogo único (no 'concat')")
+    print(f"[match] referencia: datos {cat}, cobertura {'x'.join(labels)} -> N={len(ref)}")
+    pkl = find_data_run(cfg, cat, survey)
+    if pkl:
+        with open(pkl, 'rb') as f:
+            n_run = _pick(pickle.load(f)['results']).get('n_voids')
+        print(f"[match]   corrida de datos {os.path.basename(os.path.dirname(pkl))}: N={n_run}"
+              + ('  OK' if n_run == len(ref) else '  (!) DISTINTO: revisar selección/cobertura'))
+    _REF_CACHE[key] = ref
+    return ref
+
+
+def plot_match(ws_all, ws_m, ref, cols, out_png, title):
+    show = list(dict.fromkeys(['R_void', 'z'] + [c for c in cols if c in ref.columns]))
+    show = [c for c in show if c in ws_all.columns and c in ref.columns]
+    fig, axes = plt.subplots(1, len(show), figsize=(5 * len(show), 3.8), squeeze=False)
+    for ax, c in zip(axes[0], show):
+        lo = min(ws_all[c].min(), ref[c].min()); hi = max(ws_all[c].max(), ref[c].max())
+        bins = np.linspace(lo, hi, 26)
+        ax.hist(ws_all[c], bins, histtype='step', ls='--', color='xkcd:orange', lw=1.5,
+                label=f'Websky, toda la cobertura (N={len(ws_all)})')
+        ax.hist(ws_m[c], bins, histtype='step', color='xkcd:orange', lw=2, label=f'Websky igualado (N={len(ws_m)})')
+        ax.hist(ref[c], bins, histtype='step', color='xkcd:blue', lw=2, label=f'Datos (N={len(ref)})')
+        ax.set_xlabel({'R_void': r'$R_v\ [h^{-1}{\rm Mpc}]$'}.get(c, c))
+        ax.set_title(c + ('  (igualada)' if c in cols else '  (NO igualada)'), fontsize=10)
+        ax.grid(alpha=0.25)
+    axes[0, 0].set_ylabel('N'); axes[0, 0].legend(fontsize=8)
+    fig.suptitle(title, fontsize=10)
+    fig.savefig(out_png, dpi=150, bbox_inches='tight'); plt.close(fig)
+    print(f"[match] {out_png}")
+
+
+def _install_match(cfg, cat, survey, out_dir):
+    """Reemplaza s1.load_void_samples por una versión que sortea la muestra final de Websky."""
+    m = _match_cfg(cfg)
+    ref = data_reference(cfg, cat, survey)
+    orig = s1.load_void_samples
+    nt = m.get('n_target', 'data')
+
+    def _load(config, cat_spec, cov_frac):
+        out = orig(config, cat_spec, cov_frac)
+        which = 'merged' if out['merged'] is not None else 'single'
+        if out[which] is None or str(config.get('seed_mode', 'merge')) == 'both':
+            raise ValueError("match_to_data: usar seed_mode='merge' (o catálogo único); con 'concat'/'both' "
+                             "el stack por semilla no estaría igualado")
+        ws_all = out[which]
+        sub, info = match_distribution(ws_all, ref, cols=m['cols'], n_bins=m.get('n_bins', 10),
+                                       n_target='ref' if nt == 'data' else nt, seed=m.get('draw_seed', 0),
+                                       on_short=m.get('on_short', 'shrink'), label=f' {cat}/{survey}')
+        out[which] = sub
+        tag = f"{cat}_{survey.replace('-', '')}{match_tag(cfg)}"
+        np.savetxt(os.path.join(out_dir, f"websky_matched_{tag}.dat"),
+                   sub[['R_void', 'l', 'b', 'z']].values, fmt='%.6f', header='R_void l b z (frame de la corrida)')
+        if tag not in _MATCH_PLOTTED:
+            plot_match(ws_all, sub, ref, m['cols'], os.path.join(out_dir, f"Hist_match_{tag}.png"),
+                       f"{cat} | {survey} | {match_tag(cfg).lstrip('_')}")
+            _MATCH_PLOTTED.add(tag)
+        return out
+
+    s1.load_void_samples = _load
+    return orig
 
 
 def plot_overview(ws, cfg, cats, out_dir):
@@ -899,6 +1025,11 @@ def run_one(cfg, run, cat, cat_spec, maps):
         cov_list = [COV_KEYS['ACT'], COV_KEYS['PR4']]
     print(f"\n================= WEBSKY | {cat_label(cat)} | {run['key']} -> {lab} "
           f"[{filt}{', cobertura ' + ACT_COV_TAG if cov_list else ''}, frame {fr}] =================")
+    orig_load = None
+    if match_applies(cfg, run):
+        cat_spec = dict(cat_spec, label=cat_spec['label'] + match_tag(cfg))   # carpeta/caché propias
+        orig_load = _install_match(cfg, cat, run['survey'],
+                                   os.path.join(cfg['output_folder'], 'catalogs'))
     install_websky(cat_spec, spec, cov_specs)
     c = dict(cfg)
     c.update(void_catalog='WEBSKY', cmb_map='WEBSKY', filter_mode=filt, coverage_map=cov_list,
@@ -907,6 +1038,8 @@ def run_one(cfg, run, cat, cat_spec, maps):
         return s1._run_single_map(c)
     finally:
         uninstall_websky()
+        if orig_load is not None:
+            s1.load_void_samples = orig_load
 
 
 def main(cfg=config):
