@@ -153,7 +153,7 @@ config.update({
 # sufijo _match... (no pisan las corridas sin igualar).
 MATCH_TO_DATA = {
     'enable':    True,
-    'cols':      ('R_void',),              # ('R_void',) | ('R_void', 'z') | (..., 'delta_23')
+    'cols':      ('R_void','z'),              # ('R_void',) | ('R_void', 'z') | (..., 'delta_23')
     'n_bins':    {'R_void': 10, 'z': 6, 'delta_23': 5},   # cuantiles de los DATOS por columna
     'n_target':  'data',                   # 'data' (mismo N) | 'max' (máx. N con la misma forma) | int
     'draw_seed': 0,                        # una corrida por semilla de sorteo
