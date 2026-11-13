@@ -95,7 +95,7 @@ config.update({
 
     # ---------------- Qué correr ----------------
     'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'BOTH'
-    'surveys': ['FULL', 'PR4'],
+    'surveys': ['PR4'],
 
     # ---------------- Websky: catálogo ----------------
     'cosmology':   'websky',                   # 'websky' (h=0.68, Om=0.31) | 'planck18' (test)
