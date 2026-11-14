@@ -9,8 +9,9 @@ Planck (several reconstructions) and from ACT DR6. The same machinery runs on th
 Websky simulation to provide a theory-side comparison with identical selection,
 geometry and estimator.
 
-The orientation-resolved tSZ analysis of the clusters in the void walls is kept
-outside this repository (`WHVoidsCMB_tSZ/`), for a later paper.
+The orientation-resolved tSZ analysis of the clusters in the void walls is an
+independent study, developed in its own repository:
+[oriented_tSZ](https://github.com/facutoscano/oriented_tSZ).
 
 
 ## Void catalogues
