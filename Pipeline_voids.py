@@ -79,7 +79,7 @@ config = {
     'bkg_outer': (2.0, 2.5),            # r/R_v range used by 'outer'
 
     # ---------------- Cluster ----------------
-    'n_workers': 100,                   # worker processes (None = all cores)
+    'n_workers': 90,                   # worker processes (None = all cores)
 
     # ---------------- Step control ----------------
     'run_step_1': True,
