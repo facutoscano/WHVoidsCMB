@@ -100,7 +100,7 @@ config.update({
     # ---------------- Websky: catálogo ----------------
     'cosmology':   'websky',                   # 'websky' (h=0.68, Om=0.31) | 'planck18' (test)
     'single_file': 'voids_d-0.9.dat',          # usado si N_seeds = None
-    'seed_glob':   'websky_voids/*.dat',       # usado si N_seeds = int
+    'seed_glob':   'websky_voids2/*.dat',       # usado si N_seeds = int
     'websky_cols': {'R_void': 0, 'l': 1, 'b': 2, 'z': 3,
                     'x': 4, 'y': 5, 'z_cart': 6,
                     'delta_int': 7, 'delta_23': 8,
