@@ -152,7 +152,7 @@ config.update({
 # obsPR4_PR4; las tres de ACT) usan los MISMOS voids. Carpetas, índice y figuras llevan el
 # sufijo _match... (no pisan las corridas sin igualar).
 MATCH_TO_DATA = {
-    'enable':    True,
+    'enable':    False,
     'cols':      ('R_void','z'),              # ('R_void',) | ('R_void', 'z') | (..., 'delta_23')
     'n_bins':    {'R_void': 10, 'z': 6, 'delta_23': 5},   # cuantiles de los DATOS por columna
     'n_target':  'data',                   # 'data' (mismo N) | 'max' (máx. N con la misma forma) | int
