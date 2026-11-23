@@ -94,7 +94,7 @@ config.update({
     'data_results':  '/home/ftoscano/Doctorado/Proyectos/WHVoidsCMB/Results/lensing/',   # para 'auto'
 
     # ---------------- Qué correr ----------------
-    'void_catalogs': 'WH',                     # 'WH' | 'BOSS' | 'BOTH'
+    'void_catalogs': 'BOTH',                     # 'WH' | 'BOSS' | 'BOTH'
     'surveys': ['FULL','PR4','ACT','ACT-PR4'],
 
     # ---------------- Websky: catálogo ----------------
