@@ -69,6 +69,11 @@ import sys
 import glob
 import json
 import pickle
+# Hilos: ANTES de importar numpy/healpy/sklearn (sus pools nativos se crean al cargarse).
+# Pipeline_voids y thread_control no importan numpy a nivel de módulo.
+import thread_control as tc
+from Pipeline_voids import config as PIPELINE_CONFIG
+tc.set_env_threads(tc.resolve_workers(PIPELINE_CONFIG.get('n_workers')))
 import numpy as np
 import pandas as pd
 import healpy as hp
@@ -83,7 +88,6 @@ import Functions_module as fm
 import void_seed_merge as vsm
 import S1_voids_parallel as s1
 from match_sample import match_distribution
-from Pipeline_voids import config as PIPELINE_CONFIG
 
 
 #%% Config  (= Pipeline_voids.config + claves de Websky)
@@ -1052,6 +1056,7 @@ def main(cfg=config):
     sys.stdout = DualLogger(os.path.join(lens_out, 'websky_run.log'))
     print(f"\n### WEBSKY | voids={cats} | corridas={[r['key'] for r in runs]} | "
           f"frames={sorted({r['frame'] for r in runs})} | compare_only={cfg.get('compare_only')} ###")
+    tc.setup_main(cfg)          # map2alm / rotate_alm / anafast del principal: <= n_workers hilos
 
     if not cfg.get('compare_only'):
         with open(os.path.join(lens_out, 'Websky_pipeline_config.json'), 'w') as f:

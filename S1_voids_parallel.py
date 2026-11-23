@@ -11,6 +11,7 @@ from astropy.coordinates import SkyCoord
 import Functions_module as fm
 import Parallel_module as pm
 import void_seed_merge as vsm
+import thread_control as tc
 
 
 #%% Catalogues
@@ -398,7 +399,7 @@ def _run_single_map(config):
     random_excl = config.get('random_excl_factor', None)
     bkg_mode = config.get('bkg_mode', 'randoms')
     bkg_outer = tuple(config.get('bkg_outer', (2.0, 2.5)))
-    n_workers = config.get('n_workers', None)
+    n_workers, threads_per_worker = tc.setup_main(config)
     seed_mode = config.get('seed_mode', 'concat')
     n_seeds = config.get('N_seeds', None)
     do_concat = n_seeds is not None and seed_mode in ('concat', 'both')
@@ -432,7 +433,7 @@ def _run_single_map(config):
     print(f'######### CMB LENSING PROFILES | {cat_label} voids x {map_label} #########')
     print(f'Mode={exec_mode} | Binning={binning_mode} | coverage={"+".join(cov_labels)} '
           f'(>= {min_cov} of {max_Rvoid}Rv disc) | randoms={random_pool} | bkg={bkg_mode} | '
-          f'n_workers={n_workers or os.cpu_count()}')
+          f'n_workers={n_workers} x {threads_per_worker} thread(s)')
     print(f'Output Run Folder: {run_folder}\n')
 
     # map and stamp mask (native frame)
@@ -495,7 +496,7 @@ def _run_single_map(config):
             min_cov=min_cov, stacks_cache_folder=cache_dir, cache_key=key, n_random_factor=n_rand,
             n_rotations=n_rotations, n_subsamples=n_subsamples, force_rerun=force_rerun,
             n_workers=n_workers, bkg_mode=bkg_mode, bkg_outer=bkg_outer,
-            profile_method=profile_method)
+            profile_method=profile_method, threads_per_worker=threads_per_worker)
         res['R_void_median'] = float(np.median(df['R_void'].values))
         return res
 

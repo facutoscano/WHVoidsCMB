@@ -10,6 +10,7 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.cluster import KMeans
 import Functions_module as fm
+import thread_control as tc
 
 CACHE_VERSION = 'v2'
 
@@ -149,7 +150,8 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
                                   bins_frac, lensing_map, stamp_mask, center_mask, cov_map, map_frame,
                                   min_cov, stacks_cache_folder, cache_key, n_random_factor, n_rotations,
                                   n_subsamples=20, force_rerun=False, n_workers=None,
-                                  bkg_mode='randoms', bkg_outer=(2.0, 2.5), profile_method='stamp'):
+                                  bkg_mode='randoms', bkg_outer=(2.0, 2.5), profile_method='stamp',
+                                  threads_per_worker=1):
     """
     Stack one void sample on one map, with jackknife errors and the two null tests.
 
@@ -169,9 +171,10 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
     redshifts_all = data_sample_bin['z'].values.astype(float)
     r_voids_all = data_sample_bin['R_void'].values.astype(float)
 
-    n_workers = n_workers or os.cpu_count()
+    n_workers = tc.resolve_workers(n_workers)
+    threads_per_worker = max(1, int(threads_per_worker or 1))
     print(f'[Data] Sample z in [{z_text.replace("_", ",")}], {n_voids} voids (mean z={z_mean:.3f}), '
-          f'n_workers={n_workers}...')
+          f'n_workers={n_workers} x {threads_per_worker} thread(s)...')
 
     n_rotations = n_rotations or 0
     n_random_factor = n_random_factor or 0
@@ -203,7 +206,10 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
                         cov=cov_map, frame=map_frame, method=profile_method)
     ctx = mp.get_context('fork')
     n_swap = 0
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
+    # initializer: sin esto cada worker levanta un pool BLAS/OpenMP de n_cores hilos
+    # (pv @ vecs en radial_sums_healpix) -> n_workers x n_cores hilos en total.
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
+                             initializer=tc.worker_init, initargs=(threads_per_worker,)) as executor:
         null_rot = (_rotation_null_parallel(executor, l, b, redshifts_all, r_voids_all, max_Rvoid,
                                             npix_stamp, bins_frac, n_rotations, existing_rot)
                     if n_rotations > 0 else np.empty((0, len(bins_frac) - 1)))

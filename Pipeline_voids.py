@@ -79,7 +79,9 @@ config = {
     'bkg_outer': (2.0, 2.5),            # r/R_v range used by 'outer'
 
     # ---------------- Cluster ----------------
-    'n_workers': 80,                   # worker processes (None = all cores)
+    'n_workers': 80,                    # worker processes (None = all available cores)
+    'threads_per_worker': 1,            # BLAS/OpenMP threads per worker (total = n_workers x this);
+                                        # the main process is capped at n_workers threads
 
     # ---------------- Step control ----------------
     'run_step_1': True,
@@ -89,6 +91,10 @@ config = {
 
 #%% Main
 def main():
+    # before numpy/healpy/sklearn are imported (S1 imports them): native thread pools
+    # are created with BLAS = 1 and OpenMP <= n_workers threads (see thread_control.py)
+    import thread_control as tc
+    tc.set_env_threads(tc.resolve_workers(config['n_workers']))
     lensing_out = os.path.join(config['output_folder'], 'lensing')
     os.makedirs(lensing_out, exist_ok=True)
     sys.stdout = DualLogger(os.path.join(lensing_out, "pipeline_run.log"))
