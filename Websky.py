@@ -190,11 +190,21 @@ CAT_COLORS = {'WH': 'xkcd:blue', 'BOSS': 'xkcd:orange'}
 
 #%% Logger
 class DualLogger(object):
+    """stdout -> terminal + log; en el log cada línea lleva la hora (para ver dónde se va el tiempo)."""
     def __init__(self, filepath):
         self.terminal = sys.stdout
         self.log = open(filepath, "a")
+        self._bol = True
     def write(self, message):
-        self.terminal.write(message); self.log.write(message); self.log.flush()
+        import time
+        self.terminal.write(message)
+        out = []
+        for part in message.splitlines(keepends=True):
+            if self._bol:
+                out.append(time.strftime('[%m-%d %H:%M:%S] '))
+            out.append(part)
+            self._bol = part.endswith('\n')
+        self.log.write(''.join(out)); self.log.flush()
     def flush(self):
         self.terminal.flush(); self.log.flush()
 

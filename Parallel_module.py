@@ -3,16 +3,79 @@
 
 #%% Imports
 import os
+import time
 import pickle
 import warnings
+import contextlib
+import collections
 import numpy as np
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from sklearn.cluster import KMeans
 import Functions_module as fm
 import thread_control as tc
 
 CACHE_VERSION = 'v2'
+
+_SIGNAMES = {-9: 'SIGKILL (¿OOM killer?)', -11: 'SIGSEGV (segfault)', -6: 'SIGABRT', -7: 'SIGBUS',
+             -15: 'SIGTERM (terminado por el pool tras la falla)', 0: 'salida normal (¿falló el initializer?)'}
+
+
+def _mem_gb():
+    """(RSS de este proceso, memoria disponible en la máquina) en GB."""
+    out = []
+    for path, key in (('/proc/self/status', 'VmRSS:'), ('/proc/meminfo', 'MemAvailable:')):
+        try:
+            with open(path) as f:
+                out.append(next(int(l.split()[1]) for l in f if l.startswith(key)) / 1024 ** 2)
+        except Exception:
+            out.append(float('nan'))
+    return tuple(out)
+
+
+@contextlib.contextmanager
+def worker_pool(n_workers, threads_per_worker=1, label=''):
+    """
+    ProcessPoolExecutor (fork) que FALLA en vez de colgarse si un worker muere.
+
+    Python <= 3.10: si un worker muere mientras la cola de tareas se está escribiendo, el
+    pool queda 'broken' y shutdown() espera para siempre al hilo que alimenta esa cola
+    (bug de CPython, corregido en 3.11+). Es exactamente el cuelgue de la corrida
+    noiseACT_ACT (18 h en terminate_broken -> join_thread). cancel_join_thread() evita esa
+    espera; en el camino normal no cambia nada (las tareas ya se consumieron).
+    Además se informa con qué código murió cada worker (OOM, segfault, ...).
+    """
+    rss, avail = _mem_gb()
+    print(f'[pool]{label} {n_workers} workers x {threads_per_worker} hilo(s) | RSS del principal '
+          f'{rss:.1f} GB | memoria disponible {avail:.0f} GB')
+    ex = ProcessPoolExecutor(max_workers=n_workers, mp_context=mp.get_context('fork'),
+                             initializer=tc.worker_init, initargs=(threads_per_worker,))
+    cq = getattr(ex, '_call_queue', None)
+    if cq is not None:
+        cq.cancel_join_thread()
+    t0 = time.time()
+    try:
+        yield ex
+    except BaseException as e:
+        procs = list((getattr(ex, '_processes', None) or {}).values())
+        codes = collections.Counter(p.exitcode for p in procs if p.exitcode is not None)
+        ex.shutdown(wait=False, cancel_futures=True)
+        for p in procs:
+            if p.is_alive():
+                p.kill()
+        if isinstance(e, BrokenProcessPool):
+            desc = ', '.join(f"{n} x {_SIGNAMES.get(c, f'exitcode {c}')}" for c, n in codes.items())
+            rss, avail = _mem_gb()
+            raise RuntimeError(
+                f'[pool]{label} murieron workers tras {time.time() - t0:.0f} s: {desc}. Memoria disponible '
+                f'ahora {avail:.0f} GB. Si hay SIGSEGV, el traceback del worker está en el stderr de la '
+                f'terminal (faulthandler); si hay SIGKILL sin que nadie lo matara, es memoria: '
+                f'bajar n_workers.') from e
+        raise
+    else:
+        ex.shutdown(wait=True)
+        print(f'[pool]{label} terminado en {time.time() - t0:.0f} s')
 
 #%% Worker globals (inherited through fork)
 _W = {}
@@ -79,7 +142,9 @@ def _rotation_null_parallel(executor, l, b, redshifts, r_voids, max_Rvoid, npix_
     angles = rng.uniform(10, 350, n_rotations - n_old)
     tasks = [((l - ang) % 360.0, b, redshifts, r_voids, max_Rvoid, npix_stamp, bins_frac)
              for ang in angles]
+    t0 = time.time()
     new_profiles = list(executor.map(_profile_worker, tasks))
+    print(f'[Null Test] rotations: {time.time() - t0:.0f} s')
     return np.array(list(existing_profiles) + new_profiles)
 
 
@@ -91,7 +156,9 @@ def _random_null_parallel(executor, redshifts, r_voids, max_Rvoid, npix_stamp, b
     print(f'[Null Test] {n_random - n_old} random realizations (footprint-matched)...')
     tasks = [(i, redshifts, r_voids, max_Rvoid, npix_stamp, bins_frac, rad_frac, min_cov)
              for i in range(n_old, n_random)]
+    t0 = time.time()
     out = list(executor.map(_random_worker, tasks))
+    print(f'[Null Test] randoms: {time.time() - t0:.0f} s')
     n_swap = int(sum(o[1] for o in out))
     if n_swap:
         print(f'[Null Test] (!) {n_swap} random objects could not be placed with their own (z, Rv) '
@@ -204,12 +271,8 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
         raise ValueError(f"profile_method must be 'stamp' or 'healpix', not {profile_method!r}")
     _set_worker_globals(cmb=lensing_map, stamp_mask=stamp_mask, center=center_mask,
                         cov=cov_map, frame=map_frame, method=profile_method)
-    ctx = mp.get_context('fork')
     n_swap = 0
-    # initializer: sin esto cada worker levanta un pool BLAS/OpenMP de n_cores hilos
-    # (pv @ vecs en radial_sums_healpix) -> n_workers x n_cores hilos en total.
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx,
-                             initializer=tc.worker_init, initargs=(threads_per_worker,)) as executor:
+    with worker_pool(n_workers, threads_per_worker, label=f' {release}') as executor:
         null_rot = (_rotation_null_parallel(executor, l, b, redshifts_all, r_voids_all, max_Rvoid,
                                             npix_stamp, bins_frac, n_rotations, existing_rot)
                     if n_rotations > 0 else np.empty((0, len(bins_frac) - 1)))
@@ -224,9 +287,11 @@ def process_bin_stacking_parallel(release, mode, data_sample_bin, coords_bin, ma
 
         if signal_data is None:
             print('[Profiles] Computing signal stack and errors...')
+            t0 = time.time()
             signal_map, prof_total, r_frac, prof_err, jk_profiles, cov_jk = _signal_and_jk_parallel(
                 executor, l, b, redshifts_all, r_voids_all, max_Rvoid, npix_stamp, bins_frac, mode,
                 n_subsamples, n_workers)
+            print(f'[Profiles] signal + JK: {time.time() - t0:.0f} s')
 
     cov_cmb, err_cmb = fm.sample_covariance(null_rand, kind='cmb')
     with warnings.catch_warnings():

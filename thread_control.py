@@ -93,7 +93,10 @@ def limit_threads(n, verbose=False, blas=None):
 
 
 def worker_init(n_threads):
-    """initializer de ProcessPoolExecutor: cada worker con n_threads hilos nativos."""
+    """initializer de ProcessPoolExecutor: cada worker con n_threads hilos nativos.
+    faulthandler: si un worker muere por segfault, su traceback sale por stderr."""
+    import faulthandler
+    faulthandler.enable()
     for v in _ENV_VARS:
         os.environ[v] = str(n_threads)
     limit_threads(n_threads)
